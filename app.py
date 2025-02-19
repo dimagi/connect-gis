@@ -17,6 +17,7 @@ from collections import Counter
 import torch
 import datetime
 from sklearn.metrics import pairwise_distances
+import os
 app = Flask(__name__)
 CORS(app)
 
@@ -26,6 +27,14 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
 try:
+    # Ensure the directory exists
+    os.makedirs(os.path.expanduser("~/.config/earthengine"), exist_ok=True)
+
+    # Write credentials from Render environment variable
+    credentials_path = os.path.expanduser("~/.config/earthengine/credentials")
+    if not os.path.exists(credentials_path):
+        with open(credentials_path, "w") as f:
+            f.write(os.environ.get("EEDA_CREDENTIALS", "{}"))
     ee.Initialize(
         opt_url='https://earthengine-highvolume.googleapis.com'
     )
