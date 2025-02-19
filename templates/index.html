@@ -66,7 +66,7 @@
     <input type="number" id="thresholdVal" value="1" min="0.1">
 </div> -->
 
-    <button onclick="fetchData()">Run Clustering</button>
+    <button onclick="fetchData(oaLatLangs)">Run Clustering</button>
     <button onclick="clearMap()">Clear Map</button>
 
 <script>
@@ -83,7 +83,7 @@
 
     // Call function on page load to set the correct field
     toggleInputFields();
-
+    let oaLatLangs = []
     var map = L.map('map').setView([9.0880, 7.4958],16); // Centered on Abuja, Nigeria
     // Add OpenStreetMap layer
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -122,46 +122,46 @@
         clusterLayer.clearLayers();
     }
 
+    function addOABoundary(layer, latlngs) {
+        oaLatLangs = latlngs;
+    }
+
     // When a polygon is drawn
     map.on(L.Draw.Event.CREATED, function (event) {
+        clearMap()
         // Get polygon coordinates
         var latlngs = event.layer.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);
         latlngs.push(latlngs[0]); // Close the polygon
-        event.layer.setStyle({
-            color: 'blue',     // Border color
-            weight: 1,
-            fillOpacity: 0
-        });
-        drawnItems.addLayer(event.layer);
+        addOABoundary(event.layer, latlngs)
         fetchData(latlngs)
     });
 
     map.on('draw:edited', function (e) {
+        clearMap()
         var layers = e.layers;
         layers.eachLayer(function (layer) {
             // Check if the layer is a polygon
             if (layer instanceof L.Polygon) {
-            var latlngs = layer.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);;
+                var latlngs = layer.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);
+                addOABoundary(layer, latlngs)
                 fetchData(latlngs)
-                buildingsLayer.clearLayers();
-                clusterLayer.clearLayers();
             }
         });
     });
 
     function fetchData(polygon) {
-        if (!polygon) {
+        if ( polygon.length == 0 || !polygon) {
             polygon = [[7.480294704437257,9.084527915967186],[7.480294704437257,9.092282829384425],[7.504327297210694,9.092282829384425],[7.504327297210694,9.084527915967186],[7.480294704437257,9.084527915967186]]
-            var polygonLatLng = polygon.map(coord => [coord[1], coord[0]]);
-            var polygonLayer = L.polygon(polygonLatLng, {
-                color: 'blue',          // Border color
-                weight: 1,
-                fillOpacity: 0
-            }).addTo(drawnItems);
-
-            // Fit the map to the polygon bounds
-            map.fitBounds(polygonLayer.getBounds());
         }
+        var polygonLatLng = polygon.map(coord => [coord[1], coord[0]]);
+        var polygonLayer = L.polygon(polygonLatLng, {
+            color: 'blue',          // Border color
+            weight: 1,
+            fillOpacity: 0
+        }).addTo(drawnItems);
+
+        // Fit the map to the polygon bounds
+        map.fitBounds(polygonLayer.getBounds());
         let thresholdVal = document.getElementById("thresholdVal").value;
         let clusteringType = document.getElementById("clusteringType").value;
         let noOfClusters = document.getElementById("noOfClusters").value;
