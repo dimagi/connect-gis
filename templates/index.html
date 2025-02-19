@@ -127,7 +127,26 @@
         // Get polygon coordinates
         var latlngs = event.layer.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);
         latlngs.push(latlngs[0]); // Close the polygon
+        event.layer.setStyle({
+            color: 'blue',     // Border color
+            weight: 1,
+            fillOpacity: 0
+        });
+        drawnItems.addLayer(event.layer);
         fetchData(latlngs)
+    });
+
+    map.on('draw:edited', function (e) {
+        var layers = e.layers;
+        layers.eachLayer(function (layer) {
+            // Check if the layer is a polygon
+            if (layer instanceof L.Polygon) {
+            var latlngs = layer.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);;
+                fetchData(latlngs)
+                buildingsLayer.clearLayers();
+                clusterLayer.clearLayers();
+            }
+        });
     });
 
     function fetchData(polygon) {
