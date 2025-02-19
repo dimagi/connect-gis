@@ -61,11 +61,6 @@
 
 </div>
 
-<!-- <div>
-    <label for="thresholdVal">Threshold Val</label>
-    <input type="number" id="thresholdVal" value="1" min="0.1">
-</div> -->
-
     <button onclick="fetchData(oaLatLangs)">Run Clustering</button>
     <button onclick="clearMap()">Clear Map</button>
 
@@ -75,10 +70,7 @@
         var method = document.getElementById("clusteringType").value;
         document.getElementById("kmeans-options").style.display = method === "kMeans" ? "block" : "none";
         document.getElementById("hierarchical-options").style.display = method === "hierarchicalClustering" ? "block" : "none";
-        document.getElementById("greedyDivision-options").style.display = method === "greedyDivision" ? "block" : "none";
-        document.getElementById("greedyDivision-options").style.display = method === "balancedKMeans" ? "block" : "none";
-        document.getElementById("greedyDivision-options").style.display = method === "dbScan" ? "block" : "none";
-        document.getElementById("hierarchical-options").style.display = method === "balancedKMeans" ? "block" : "none";
+        document.getElementById("greedyDivision-options").style.display = (method === "greedyDivision" || (method === "balancedKMeans") || (method === "dbScan")) ? "block" : "none";
     }
 
     // Call function on page load to set the correct field
