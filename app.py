@@ -8,8 +8,7 @@ from collections import Counter
 from sklearn.metrics import pairwise_distances
 import os
 app = Flask(__name__)
-CORS(app)
-
+CORS(app, resources={r"/*": {"origins": "*"}})
 try:
     # Ensure the directory exists
     os.makedirs(os.path.expanduser("~/.config/earthengine"), exist_ok=True)
