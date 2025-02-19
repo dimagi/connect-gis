@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering, KMeans, DBSCAN
@@ -26,7 +26,9 @@ try:
 except Exception as e:
     print(f"Error initializing Earth Engine: {e}")
 
-
+@app.route("/")
+def home():
+    return render_template("index.html")
 
 def optimized_balanced_kmeans1(buildingsGDF, coords, num_clusters=3, max_iter=300, balance_tolerance=0.05):
     n_samples = len(coords)
@@ -233,4 +235,4 @@ def get_building_density():
 
 # Run the Flask app
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5000)

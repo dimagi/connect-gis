@@ -1,13 +1,7 @@
 Flask
-flask_sqlalchemy
-geoalchemy2
-shapely
-flask_cors
+Flask-Cors
 numpy
 scikit-learn
 scipy
-pandas
-geopandas
 earthengine-api
-geemap
-torch
+gunicorn
