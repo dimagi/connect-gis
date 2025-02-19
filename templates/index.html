@@ -159,7 +159,7 @@
         let noOfClusters = document.getElementById("noOfClusters").value;
         let noOfBuildings = document.getElementById("noOfBuildings").value;
         if (!thresholdVal) thresholdVal = 0.5
-        fetch('http://127.0.0.1:5000/get_building_density', {
+        fetch('https://map-clustering.onrender.com/get_building_density', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ polygon, thresholdVal, clusteringType, noOfClusters, noOfBuildings })
