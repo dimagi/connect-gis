@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Building Density Clustering</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+
+    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+
+    <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
+
+    <style>
+        #map { height: 500px; width: 100%; }
+        #info { font-size: 18px; margin-top: 10px; }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<h2>Building Density Clustering</h2>
+<p>Draw a polygon on the map to see the number of buildings and their cluster representation.</p>
+
+<div id="map"></div>
+<p id="info">Buildings in selected area: <span id="building-count">0</span></p>
+
+</div>
+
+<div>
+    <label for="clusteringType">Select Clustering Method:</label>
+    <select id="clusteringType" onchange="toggleInputFields()">
+        <option value="kMeans">K-Means Clustering</option>
+        <option value="balancedKMeans">Balanced K Means</option>
+        <option value="dbScan">DB Scan</option>
+        <option value="hierarchicalClustering">Hierarchical Clustering</option>
+        <option value="greedyDivision">Greedy Division</option>
+    </select>
+  
+    <div id="kmeans-options" class="hidden">
+        <label for="noOfClusters">Number of Clusters:</label>
+        <input type="number" id="noOfClusters" min="1" value="3">
+    </div>
+    <br>
+    <div id="hierarchical-options" class="hidden">
+        <label for="thresholdVal">Threshold Value:</label>
+        <input type="number" id="thresholdVal" step="0.01" value="10">
+    </div>
+    <div id="greedyDivision-options" class="hidden">
+        <label for="noOfBuildings">No of Buildings</label>
+        <input type="number" id="noOfBuildings" value="100">
+    </div>
+
+</div>
+
+<!-- <div>
+    <label for="thresholdVal">Threshold Val</label>
+    <input type="number" id="thresholdVal" value="1" min="0.1">
+</div> -->
+
+    <button onclick="fetchData()">Run Clustering</button>
+    <button onclick="clearMap()">Clear Map</button>
+
+<script>
+
+    function toggleInputFields() {
+        var method = document.getElementById("clusteringType").value;
+        document.getElementById("kmeans-options").style.display = method === "kMeans" ? "block" : "none";
+        document.getElementById("hierarchical-options").style.display = method === "hierarchicalClustering" ? "block" : "none";
+        document.getElementById("greedyDivision-options").style.display = method === "greedyDivision" ? "block" : "none";
+        document.getElementById("greedyDivision-options").style.display = method === "balancedKMeans" ? "block" : "none";
+        document.getElementById("greedyDivision-options").style.display = method === "dbScan" ? "block" : "none";
+        document.getElementById("hierarchical-options").style.display = method === "balancedKMeans" ? "block" : "none";
+    }
+
+    // Call function on page load to set the correct field
+    toggleInputFields();
+
+    var map = L.map('map').setView([9.0880, 7.4958],16); // Centered on Abuja, Nigeria
+    // Add OpenStreetMap layer
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Enable drawing tools
+    var drawnItems = new L.FeatureGroup();
+    map.addLayer(drawnItems);
+
+    var drawControl = new L.Control.Draw({
+        draw: {
+            polygon: true,
+            rectangle: true,
+            polyline: false,
+            circle: false,
+            marker: false
+        },
+        edit: { featureGroup: drawnItems }
+    });
+    map.addControl(drawControl);
+
+    // Layer for displaying buildings
+    var buildingsLayer = L.geoJSON(null, {
+        style: function () {
+            return { color: "red", weight: 1, fillOpacity: 0.4 };
+        }
+    }).addTo(map);
+
+    // Cluster Layer
+    var clusterLayer = L.featureGroup().addTo(map);
+
+    function clearMap() {
+        drawnItems.clearLayers();
+        buildingsLayer.clearLayers();
+        clusterLayer.clearLayers();
+    }
+
+    // When a polygon is drawn
+    map.on(L.Draw.Event.CREATED, function (event) {
+        // Get polygon coordinates
+        var latlngs = event.layer.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);
+        latlngs.push(latlngs[0]); // Close the polygon
+        fetchData(latlngs)
+    });
+
+    function fetchData(polygon) {
+        if (!polygon) {
+            polygon = [[7.480294704437257,9.084527915967186],[7.480294704437257,9.092282829384425],[7.504327297210694,9.092282829384425],[7.504327297210694,9.084527915967186],[7.480294704437257,9.084527915967186]]
+            var polygonLatLng = polygon.map(coord => [coord[1], coord[0]]);
+            var polygonLayer = L.polygon(polygonLatLng, {
+                color: 'blue',          // Border color
+                weight: 1,
+                fillOpacity: 0
+            }).addTo(drawnItems);
+
+            // Fit the map to the polygon bounds
+            map.fitBounds(polygonLayer.getBounds());
+        }
+        let thresholdVal = document.getElementById("thresholdVal").value;
+        let clusteringType = document.getElementById("clusteringType").value;
+        let noOfClusters = document.getElementById("noOfClusters").value;
+        let noOfBuildings = document.getElementById("noOfBuildings").value;
+        if (!thresholdVal) thresholdVal = 0.5
+        fetch('http://127.0.0.1:5000/get_building_density', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ polygon, thresholdVal, clusteringType, noOfClusters, noOfBuildings })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.building_count !== undefined) {
+                document.getElementById('building-count').innerText = data.building_count;
+            } else {
+                document.getElementById('building-count').innerText = "Error fetching data";
+            }
+
+            // Overlay building polygons
+            if (data.buildings) {
+                L.geoJSON(data.buildings, {
+                    style: function (feature) {
+                        const clusterLabel = feature.properties.cluster_label; // Get cluster label
+                        return {
+                            color: getColorForNumber(clusterLabel), // Assign color based on cluster
+                            weight: 1,
+                            fillOpacity: 0.4
+                        };
+                    }
+                }).addTo(buildingsLayer);
+            }
+
+            // Overlay clusters
+            if (data.clusters) {
+                const clusterGroups = {};
+
+                // Group points by cluster ID and calculate number of buildings per cluster
+                data.clusters.forEach(feature => {
+                    const { cluster, coordinates, numOfBuildings } = feature;
+                    
+                    if (!clusterGroups[cluster]) {
+                        clusterGroups[cluster] = { points: [], numOfBuildings: 0 };
+                    }
+                    
+                    clusterGroups[cluster].points.push(coordinates);
+                    clusterGroups[cluster].numOfBuildings = numOfBuildings;
+                });
+
+                // Draw cluster boundaries and popups
+                Object.entries(clusterGroups).forEach(([clusterId, { points, numOfBuildings }]) => {
+                    if (points.length > 2) {
+                        var boundary = turf.convex(turf.featureCollection(points.map(p => turf.point(p))));
+                        if (boundary) {
+                            let color = 'blue'
+                            if(clusteringType == 'balancedKMeans') {
+                                color = 'red'
+                            }
+                            var boundaryLayer = L.geoJSON(boundary, { color: color, fillOpacity: 0 });
+                            boundaryLayer.bindPopup(`Cluster ${clusterId} \n Number of Buildings: ${numOfBuildings}`);
+                            clusterLayer.addLayer(boundaryLayer);
+                        }
+                    }
+                });
+            }
+        })
+        .catch(error => console.error('Error:', error));
+
+function getColorForNumber(num) {
+    if (num == 0) return 'red'
+    if (num ==1) return 'green'
+    if (num == 2) return 'blue'
+    // Generate RGB values in the dark range (0-100)
+    let r = (num * 67) % 100; // Red component
+    let g = (num * 97) % 100; // Green component
+    let b = (num * 137) % 100; // Blue component
+
+    // Convert values to two-digit hex (ensuring dark shades)
+    const toHex = (value) => ('0' + value.toString(16)).slice(-2); 
+
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+    }
+</script>
+
+</body>
+</html>
