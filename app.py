@@ -1,30 +1,14 @@
 from flask import Flask, request, jsonify
-from flask_sqlalchemy import SQLAlchemy
-from geoalchemy2 import Geometry
-from geoalchemy2.functions import ST_Within
-from shapely.geometry import Polygon
 from flask_cors import CORS
-import json
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering, KMeans, DBSCAN
 from scipy.cluster.hierarchy import linkage, fcluster
-import pandas as pd
-import geopandas as gpd
-from shapely.wkb import loads
 import ee
-import geemap
 from collections import Counter
-import torch
-import datetime
 from sklearn.metrics import pairwise_distances
 import os
 app = Flask(__name__)
 CORS(app)
-
-# Setup Flask SQLAlchemy and PostGIS connection
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:root@localhost:5432/open_builidings_data'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
 
 try:
     # Ensure the directory exists
@@ -42,18 +26,6 @@ try:
 except Exception as e:
     print(f"Error initializing Earth Engine: {e}")
 
-
-# Define your Building model with GeoAlchemy2
-class Building(db.Model):
-    __tablename__ = 'nigeria'
-
-    id = db.Column(db.Integer, primary_key=True)
-    latitude = db.Column(db.Float)
-    longitude = db.Column(db.Float)
-    area_in_meters = db.Column(db.Float)
-    confidence = db.Column(db.Float)
-    geometry = db.Column(Geometry('MULTIPOLYGON', srid=4326))  # PostGIS geometry column
-    full_plus_code = db.Column(db.String)
 
 
 def optimized_balanced_kmeans1(buildingsGDF, coords, num_clusters=3, max_iter=300, balance_tolerance=0.05):
@@ -182,9 +154,11 @@ def getClusters(buildingsGDF, coords, cluster_labels):
         }
         for coord, cluster_label in zip(coords, cluster_labels)  # Iterate over coords and cluster labels
     ]
-    buildingsGDF["cluster_label"] = cluster_labels
+    buildingsGDF["cluster_label"] = cluster_labels.tolist()
 
     return clusters
+
+
 
 def cluster_buildings_dbscan(buildingsGDF, coords, minSamples):
         epsilon = np.ptp(coords, axis=0).max() * 0.02 # 2% of the maximum range
@@ -211,45 +185,6 @@ def cluster_buildings_kMeans(buildingsGDF, coords, num_clusters=3):
     cluster_labels = kmeans.fit_predict(coords)
     return  getClusters(buildingsGDF, coords, cluster_labels)
 
-def gdf_from_db(polygon_coords):
-    """
-    Creates a GeoDataFrame from a SQLAlchemy query result.
-
-    Args:
-        query: A SQLAlchemy query object that returns Building objects.
-
-    Returns:
-        A GeoDataFrame containing the data from the query.
-    """
-
-    # Query using SQLAlchemy with GeoAlchemy2
-    buildings_in_polygon = Building.query.filter(
-        ST_Within(Building.geometry, db.func.ST_GeomFromText(Polygon(polygon_coords).wkt, 4326))
-    ).all()
-
-    data = []
-    for building in buildings_in_polygon:
-        wkb_data = building.geometry.desc  # Get WKB data from WKBElement
-        shapely_geom = loads(wkb_data)
-        data.append({
-            'id': building.id,
-            'latitude': building.latitude,
-            'longitude': building.longitude,
-            'area_in_meters': building.area_in_meters,
-            'confidence': building.confidence,
-            'full_plus_code': building.full_plus_code,
-            'geometry': shapely_geom  # Keep the geometry object
-        })
-    # Convert to Pandas DataFrame
-    df = pd.DataFrame(data)
-
-    # Convert to GeoDataFrame
-    gdf = gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")  # Specify CRS
-
-    return gdf
-
-
-
 @app.route('/get_building_density', methods=['POST'])
 def get_building_density():
     data = request.get_json()
@@ -261,16 +196,16 @@ def get_building_density():
     if not polygon_coords:
         return jsonify({"error": "Invalid polygon coordinates"}), 400
 
-    # # Create EE Polygon geometry
-    # region = ee.Geometry.Polygon(polygon_coords)
-    # # Filter buildings inside the polygon
-    # filtered_buildings = buildings.filterBounds(region)
+    # Create EE Polygon geometry
+    region = ee.Geometry.Polygon(polygon_coords)
+    # Filter buildings inside the polygon
+    filtered_buildings = buildings.filterBounds(region)
 
-    # buildings_geojson = filtered_buildings.getInfo()
-    # coordinates = [feature['properties']['longitude_latitude']['coordinates'] for feature in buildings_geojson['features']]
+    buildings_geojson = filtered_buildings.getInfo()
+    coordinates = [feature['properties']['longitude_latitude']['coordinates'] for feature in buildings_geojson['features']]
 
-    buildingsGDF = gdf_from_db(polygon_coords)
-    coordinates = buildingsGDF[['longitude', 'latitude']].values.tolist()
+    # buildingsGDF = gdf_from_db(polygon_coords)
+    # coordinates = buildingsGDF[['longitude', 'latitude']].values.tolist()
 
     if not coordinates:
         return jsonify({"message": "No buildings found within the polygon"}), 404
@@ -279,19 +214,19 @@ def get_building_density():
     kVal = int(buildingsCount/int(noOfBuildings))
     # Perform clustering (or any other processing) as needed
     if(clusteringType == 'kMeans'):
-        clusters = cluster_buildings_kMeans(buildingsGDF, coordinates, int(noOfClusters))
+        clusters = cluster_buildings_kMeans(buildings_geojson, coordinates, int(noOfClusters))
     elif(clusteringType == 'greedyDivision'):
-        clusters = cluster_buildings_kMeans(buildingsGDF, coordinates, int(kVal))
+        clusters = cluster_buildings_kMeans(buildings_geojson, coordinates, int(kVal))
     elif(clusteringType == 'balancedKMeans'):
-        clusters = optimized_balanced_kmeans1(buildingsGDF, coordinates, balance_tolerance=float(thresholdVal/100))
+        clusters = optimized_balanced_kmeans1(buildings_geojson, coordinates, balance_tolerance=float(thresholdVal/100))
     elif (clusteringType == 'hierarchicalClustering'):
-        clusters = cluster_buildings_with_size(buildingsGDF, coordinates, 100, thresholdVal)
+        clusters = cluster_buildings_with_size(buildings_geojson, coordinates, 100, thresholdVal)
     elif (clusteringType == 'dbScan'):
-        clusters = cluster_buildings_dbscan(buildingsGDF, coordinates, int(noOfBuildings))
+        clusters = cluster_buildings_dbscan(buildings_geojson, coordinates, int(noOfBuildings))
 
     return jsonify({
         "building_count": buildingsCount,
-        "buildings": json.loads(buildingsGDF.to_json()),
+        "buildings": buildings_geojson,
         "clusters": clusters,
     })
 

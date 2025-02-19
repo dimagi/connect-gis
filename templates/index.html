@@ -182,9 +182,15 @@
 
             // Overlay building polygons
             if (data.buildings) {
+                // Ensure that each feature gets the corresponding cluster label
+                data.buildings.features.forEach((feature, index) => {
+                    feature.properties.cluster_label = data.buildings.cluster_label[index]; // Assign label to properties
+                });
+
+                // Now, render the GeoJSON with updated cluster labels
                 L.geoJSON(data.buildings, {
                     style: function (feature) {
-                        const clusterLabel = feature.properties.cluster_label; // Get cluster label
+                        const clusterLabel = feature.properties.cluster_label; // Access updated label
                         return {
                             color: getColorForNumber(clusterLabel), // Assign color based on cluster
                             weight: 1,
@@ -193,6 +199,7 @@
                     }
                 }).addTo(buildingsLayer);
             }
+
 
             // Overlay clusters
             if (data.clusters) {
