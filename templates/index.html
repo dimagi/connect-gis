@@ -76,11 +76,31 @@
     // Call function on page load to set the correct field
     toggleInputFields();
     let oaLatLangs = []
-    var map = L.map('map').setView([9.0880, 7.4958],16); // Centered on Abuja, Nigeria
+    // var map = L.map('map').setView([9.0880, 7.4958],16); // Centered on Abuja, Nigeria
+    var map = L.map('map').setView([9.082, 8.6753], 6); // Centered on Nigeria
+
+
     // Add OpenStreetMap layer
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
+
+
+    var wardsLayer = null; // Store currently displayed wards
+    var allWards = null;   // Store full GeoJSON data
+    var loadedBounds = null; // Track last loaded viewport
+
+    // Load GeoJSON once
+    fetch('/static/nigeria_ward.geojson')
+    .then(response => response.json())
+    .then(data => {
+        allWards = data;
+        updateWards();
+    })
+    .catch(error => console.error('Error loading GeoJSON:', error));
+
+
+    map.on("zoomend moveend", updateWards);
 
     // Enable drawing tools
     var drawnItems = new L.FeatureGroup();
@@ -248,6 +268,57 @@ function getColorForNumber(num) {
 }
 
     }
+
+    function updateWards() {
+        var zoomLevel = map.getZoom();
+
+        // Remove wards if zoom level is ≤ 10
+        if (zoomLevel <= 10) {
+            if (wardsLayer) {
+                map.removeLayer(wardsLayer);
+                wardsLayer = null;
+            }
+            return;
+        }
+
+        if (!allWards) return;
+
+        var bounds = map.getBounds();
+
+        // Avoid reloading if the viewport hasn't changed significantly
+        if (loadedBounds && loadedBounds.contains(bounds)) return;
+
+        // Remove previous layer before adding new one
+        if (wardsLayer) {
+            map.removeLayer(wardsLayer);
+        }
+
+        // Filter features within viewport
+        var filteredWards = {
+            "type": "FeatureCollection",
+            "features": allWards.features.filter(function(feature) {
+                return feature.geometry.coordinates.some(multiPolygon =>
+                    multiPolygon.some(polygon =>
+                        polygon.some(coord => bounds.contains([coord[1], coord[0]]))
+                    )
+                );
+            })
+        };
+        // Add filtered wards to map
+        wardsLayer = L.geoJson(filteredWards, {
+            onEachFeature: function(feature, layer) {
+                layer.bindPopup(feature.properties.ward_name);
+            },
+            style: function(feature) {
+                return { color: "black", weight: 1, fillOpacity: 0, dashArray: "4,4" };
+            }
+        }).addTo(map);
+
+        loadedBounds = bounds; // Store loaded bounds
+    }
+
+
+
 </script>
 
 </body>
