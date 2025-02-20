@@ -250,23 +250,22 @@
             }
         })
         .catch(error => console.error('Error:', error));
+    }
 
-function getColorForNumber(num) {
-    if (num == 0) return 'red'
-    if (num ==1) return 'green'
-    if (num == 2) return 'blue'
-    if (num == -1) return 'purple'
-    // Generate RGB values in the dark range (0-100)
-    let r = (num * 67) % 100; // Red component
-    let g = (num * 97) % 100; // Green component
-    let b = (num * 137) % 100; // Blue component
+    function getColorForNumber(num) {
+        if (num == 0) return 'red'
+        if (num ==1) return 'green'
+        if (num == 2) return 'blue'
+        if (num == -1) return 'purple'
+        // Generate RGB values in the dark range (0-100)
+        let r = (num * 67) % 100; // Red component
+        let g = (num * 97) % 100; // Green component
+        let b = (num * 137) % 100; // Blue component
 
-    // Convert values to two-digit hex (ensuring dark shades)
-    const toHex = (value) => ('0' + value.toString(16)).slice(-2); 
+        // Convert values to two-digit hex (ensuring dark shades)
+        const toHex = (value) => ('0' + value.toString(16)).slice(-2); 
 
-    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-}
-
+        return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
     }
 
     function updateWards() {
