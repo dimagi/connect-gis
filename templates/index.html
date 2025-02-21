@@ -11,10 +11,11 @@
     <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
 
-    <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
     
+    <script src="https://unpkg.com/rbush@3.0.1/rbush.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
 
     <style>
@@ -73,7 +74,7 @@
         document.getElementById("greedyDivision-options").style.display = (method === "greedyDivision" || (method === "balancedKMeans") || (method === "dbScan")) ? "block" : "none";
     }
 
-    // Call function on page load to set the correct field
+
     toggleInputFields();
     let oaLatLangs = []
     // var map = L.map('map').setView([9.0880, 7.4958],16); // Centered on Abuja, Nigeria
@@ -86,32 +87,26 @@
     }).addTo(map);
 
 
-    var wardsLayer = null; // Store currently displayed wards
-    var allWards = null;   // Store full GeoJSON data
-    var loadedBounds = null; // Track last loaded viewport
+    const wardsIndex = new RBush();
+    const facilitiesIndex = new RBush();
+    let wardsLayer = null;
+    let healthFacilitiesLayer = null;
+    let loadedWardsBounds = null;
+    let loadedHealthBounds = null;
+    Promise.all([
+        fetch('/static/nigeria_ward.geojson').then(r => r.json()),
+        fetch('/static/nigeria_health_facilities.geojson').then(r => r.json())
+    ]).then(([wardsData, facilitiesData]) => {
+        setupIndex(wardsData, wardsIndex, 'polygon');
+        setupIndex(facilitiesData, facilitiesIndex, 'point');
+        updateMapLayers();
+    });
 
-    // Load GeoJSON once
-    fetch('/static/nigeria_ward.geojson')
-    .then(response => response.json())
-    .then(data => {
-        allWards = data;
+    const updateMapLayers = debounce(() => {
         updateWards();
-    })
-    .catch(error => console.error('Error loading Ward GeoJSON:', error));
-
-    var allHealthFacilityData = null;
-    var healthFacilitiesLayer = null;
-    var loadedHealthBounds = null;
-    fetch('/static/nigeria_health_facilities.geojson')
-    .then(response => response.json())
-    .then(data => {
-        allHealthFacilityData = data;
         updateHealthFacilities();
-    })
-    .catch(error => console.error('Error loading Heath GeoJSON:', error));
-
-
-    map.on("zoomend moveend", updateMapLayers);
+    }, 200);
+    map.on('zoomend moveend', updateMapLayers);
 
     // Enable drawing tools
     var drawnItems = new L.FeatureGroup();
@@ -138,11 +133,6 @@
 
     // Cluster Layer
     var clusterLayer = L.featureGroup().addTo(map);
-
-    function updateMapLayers() {
-        updateWards()
-        updateHealthFacilities()
-    }
 
     function clearMap() {
         drawnItems.clearLayers();
@@ -284,105 +274,76 @@
         return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
     }
 
-    function updateWards() {
-        var zoomLevel = map.getZoom();
+    function setupIndex(data, index, type) {
+        index.load(data.features.map(f => {
+            const coords = f.geometry.coordinates;
+            const [minLng, minLat, maxLng, maxLat] = type === 'point' 
+                ? [coords[0], coords[1], coords[0], coords[1]]
+                : turf.bbox(f);
+            return { minX: minLng, minY: minLat, maxX: maxLng, maxY: maxLat, feature: f };
+        }));
+    }
 
-        // Remove wards if zoom level is ≤ 10
-        if (zoomLevel <= 10) {
-            if (wardsLayer) {
-                map.removeLayer(wardsLayer);
-                wardsLayer = null;
-                loadedBounds = null
-            }
+    function updateWards() {
+        const zoom = map.getZoom();
+        if (zoom <= 10) {
+            wardsLayer?.clearLayers();
+            loadedWardsBounds = null;
+            return;
+        }
+        
+        const bounds = map.getBounds();
+        if (loadedWardsBounds && loadedWardsBounds.contains(bounds)) {
             return;
         }
 
-        if (!allWards) return;
+        const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
+        const visible = wardsIndex.search({ minX: bbox[0], minY: bbox[1], maxX: bbox[2], maxY: bbox[3] })
+            .map(item => item.feature);
 
-        var bounds = map.getBounds();
-
-        // Avoid reloading if the viewport hasn't changed significantly
-        if (loadedBounds && loadedBounds.contains(bounds)) return;
-
-        // Remove previous layer before adding new one
-        if (wardsLayer) {
-            map.removeLayer(wardsLayer);
-        }
-
-        // Filter features within viewport
-        var filteredWards = {
-            "type": "FeatureCollection",
-            "features": allWards.features.filter(function(feature) {
-                return feature.geometry.coordinates.some(multiPolygon =>
-                    multiPolygon.some(polygon =>
-                        polygon.some(coord => bounds.contains([coord[1], coord[0]]))
-                    )
-                );
-            })
-        };
-        // Add filtered wards to map
-        wardsLayer = L.geoJson(filteredWards, {
-            onEachFeature: function(feature, layer) {
-                layer.bindPopup(feature.properties.ward_name);
-            },
-            style: function(feature) {
-                return { color: "black", weight: 1, fillOpacity: 0, dashArray: "4,4" };
-            }
+        if (!wardsLayer) wardsLayer = L.geoJson(null, {
+            style: { color: "black", weight: 1, fillOpacity: 0, dashArray: "4,4" },
+            onEachFeature: (feature, layer) => layer.bindPopup(feature.properties.ward_name)
         }).addTo(map);
-
-        loadedBounds = bounds; // Store loaded bounds
+        wardsLayer.clearLayers().addData({ type: "FeatureCollection", features: visible });
+        loadedWardsBounds = bounds;
     }
 
     function updateHealthFacilities() {
-        var zoomLevel = map.getZoom();
-
-        // Remove health facilities if zoom level is ≤ 10
-        if (zoomLevel <= 11) {
-            if (healthFacilitiesLayer) {
-                map.removeLayer(healthFacilitiesLayer);
-                healthFacilitiesLayer = null;
-                loadedHealthBounds = null;
-            }
+        const zoom = map.getZoom();
+        if (zoom <= 11) {
+            healthFacilitiesLayer?.clearLayers();
+            loadedHealthBounds = null;
+            return;
+        }
+        
+        const bounds = map.getBounds();
+        if (loadedHealthBounds && loadedHealthBounds.contains(bounds)) {
             return;
         }
 
-        if (!allHealthFacilityData) return;
+        const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
+        const visible = facilitiesIndex.search({ minX: bbox[0], minY: bbox[1], maxX: bbox[2], maxY: bbox[3] })
+            .map(item => item.feature);
 
-        var bounds = map.getBounds();
-
-        // Avoid reloading if the viewport hasn't changed significantly
-        if (loadedHealthBounds && loadedHealthBounds.contains(bounds)) return;
-
-        // Remove previous layer before adding new one
-        if (healthFacilitiesLayer) {
-            map.removeLayer(healthFacilitiesLayer);
+        if (!healthFacilitiesLayer) {
+            healthFacilitiesLayer = L.markerClusterGroup({ maxClusterRadius: 40 }).addTo(map);
         }
-
-        // Filter facilities within viewport
-        var filteredFacilities = {
-            "type": "FeatureCollection",
-            "features": allHealthFacilityData.features.filter(function(feature) {
-                var coord = feature.geometry.coordinates;
-                return bounds.contains([coord[1], coord[0]]);
-            })
-        };
-
-        // Add filtered health facilities to map
-        healthFacilitiesLayer = L.geoJson(filteredFacilities, {
-            pointToLayer: function(feature, latlng) {
-                return L.marker(latlng);
-            },
-            onEachFeature: function(feature, layer) {
-                layer.bindPopup(
-                    `<b>${feature.properties.name}</b><br>
-                    Ward: ${feature.properties.ward_name}<br>`
-                );
-            }
-        }).addTo(map);
-
-        loadedHealthBounds = bounds; // Store loaded bounds
+        healthFacilitiesLayer.clearLayers().addLayers(visible.map(f => 
+            L.marker([f.geometry.coordinates[1], f.geometry.coordinates[0]])
+                .bindPopup(`<b>${f.properties.name}</b><br>Ward: ${f.properties.ward_name}`)
+        ));
+        
+        loadedHealthBounds = bounds;
     }
 
+    function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
 
 </script>
 
