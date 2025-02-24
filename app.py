@@ -291,9 +291,26 @@ def cluster_buildings_kMeans(buildingsGDF, coords, num_clusters=3):
     cluster_labels = kmeans.fit_predict(coords)
     return  getClusters(buildingsGDF, coords, cluster_labels)
 
-import ee
-
 def getGrids(region, filtered_buildings, grid_size=50):
+    grid = ee.FeatureCollection(region.coveringGrid('EPSG:4326', grid_size))  # Ensure it's a FeatureCollection
+
+    density_zones = grid.map(
+        lambda cell: ee.Feature(cell).set("count", filtered_buildings.filterBounds(cell.geometry()).size()))
+
+    # Convert to GeoJSON
+    density_zones_geojson = density_zones.getInfo()
+
+    density_features = []
+    for feature in density_zones_geojson["features"]:
+        if feature["properties"]["count"] > 0:
+            density_features.append({
+                "type": "Feature",
+                "geometry": feature["geometry"],
+                "properties": {"count": feature["properties"]["count"]}
+            })
+    return density_features
+
+def getGrids1(region, filtered_buildings, grid_size=50):
     """
     Generate 50m x 50m grids with building counts within a region, optimized for speed.
 
