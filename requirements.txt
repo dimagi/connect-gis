@@ -5,3 +5,7 @@ scikit-learn
 scipy
 earthengine-api
 gunicorn
+k-means-constrained
+pandas==2.2.0
+geopandas==0.14.3
+shapely==2.0.3

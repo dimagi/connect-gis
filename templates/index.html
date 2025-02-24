@@ -5,22 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Building Density Clustering</title>
 
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"/>
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
 
     <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"/>
 
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css" />
-    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css"/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css"/>
+
     <script src="https://unpkg.com/rbush@3.0.1/rbush.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
-
+    <script src="https://unpkg.com/proj4@2.9.0/dist/proj4.js"></script>
     <style>
-        #map { height: 500px; width: 100%; }
-        #info { font-size: 18px; margin-top: 10px; }
+        #map {
+            height: 500px;
+            width: 100%;
+        }
+
+        #info {
+            font-size: 18px;
+            margin-top: 10px;
+        }
+
         .hidden {
             display: none;
         }
@@ -37,41 +45,52 @@
 </div>
 
 <div>
-    <label for="clusteringType">Select Clustering Method:</label>
-    <select id="clusteringType" onchange="toggleInputFields()">
-        <option value="kMeans">K-Means Clustering</option>
-        <option value="balancedKMeans">Balanced K Means</option>
-        <option value="dbScan">DB Scan</option>
-        <option value="hierarchicalClustering">Hierarchical Clustering</option>
-        <option value="greedyDivision">Greedy Division</option>
-    </select>
-  
-    <div id="kmeans-options" class="hidden">
+    <div>
+        <label for="clusteringType">Select Clustering Method:</label>
+        <select id="clusteringType" onchange="toggleInputFields()">
+            <option value="kMeans">K-Means Clustering</option>
+            <option value="balancedKMeans">Balanced K Means</option>
+            <!-- <option value="binarySearch">Cluster by Binary Search</option>
+            <option value="sampleAndScale">Cluster by Sampling and Scaling</option> -->
+            <!-- <option value="dbScan">DB Scan</option>
+            <option value="hierarchicalClustering">Hierarchical Clustering</option>
+            <option value="greedyDivision">Greedy Division</option> -->
+        </select>
+    </div>
+    <div id="noOfClustersIP" class="hidden">
+        <br>
         <label for="noOfClusters">Number of Service Areas:</label>
         <input type="number" id="noOfClusters" min="1" value="3">
     </div>
-    <br>
-    <div id="hierarchical-options" class="hidden">
-        <label for="thresholdVal">Threshold Value:</label>
+    <div id="noOfBuildingsIP" class="hidden">
+        <br>
+        <label for="noOfBuildings">No of Buildings</label>
+        <input type="number" id="noOfBuildings" value="250">
+    </div>
+    <div id="thresholdValueIP" class="hidden">
+        <br>
+        <label for="thresholdVal">Tolerance Value as %:</label>
         <input type="number" id="thresholdVal" step="0.01" value="10">
     </div>
-    <div id="greedyDivision-options" class="hidden">
-        <label for="noOfBuildings">No of Buildings</label>
-        <input type="number" id="noOfBuildings" value="100">
+    <div id="gridLengthIP">
+        <br>
+        <label for="gridLength">Grid Length in metres:</label>
+        <input type="number" id="gridLength" step="0.01" value="50">
     </div>
-
+    <br>
 </div>
 
-    <button onclick="fetchData(oaLatLangs)">Run Clustering</button>
-    <button onclick="clearMap()">Clear Map</button>
+<button onclick="fetchData(oaLatLangs)">Run Clustering</button>
+<button onclick="getGrids(oaLatLangs)">Get Grids</button>
+<button onclick="clearMap()">Clear Map</button>
 
 <script>
 
     function toggleInputFields() {
         var method = document.getElementById("clusteringType").value;
-        document.getElementById("kmeans-options").style.display = method === "kMeans" ? "block" : "none";
-        document.getElementById("hierarchical-options").style.display = method === "hierarchicalClustering" ? "block" : "none";
-        document.getElementById("greedyDivision-options").style.display = (method === "greedyDivision" || (method === "balancedKMeans") || (method === "dbScan")) ? "block" : "none";
+        document.getElementById("noOfClustersIP").style.display = (method === "kMeans") ? "block" : "none";
+        document.getElementById("thresholdValueIP").style.display = (method === "hierarchicalClustering" || (method === "kMeans") || (method === "balancedKMeans")) ? "block" : "none";
+        document.getElementById("noOfBuildingsIP").style.display = (method === "greedyDivision" || (method === "dbScan" || (method === "balancedKMeans"))) ? "block" : "none";
     }
 
 
@@ -79,7 +98,7 @@
     let oaLatLangs = []
     // var map = L.map('map').setView([9.0880, 7.4958],16); // Centered on Abuja, Nigeria
     var map = L.map('map').setView([9.082, 8.6753], 6); // Centered on Nigeria
-
+    // var map = L.map('map').setView([13.3041, 7.7968],14); // Centered on Abuja, Nigeria
 
     // Add OpenStreetMap layer
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -120,32 +139,40 @@
             circle: false,
             marker: false
         },
-        edit: { featureGroup: drawnItems }
+        edit: {featureGroup: drawnItems}
     });
     map.addControl(drawControl);
 
     // Layer for displaying buildings
     var buildingsLayer = L.geoJSON(null, {
         style: function () {
-            return { color: "red", weight: 1, fillOpacity: 0.4 };
+            return {color: "red", weight: 1, fillOpacity: 0.4};
         }
     }).addTo(map);
 
     // Cluster Layer
     var clusterLayer = L.featureGroup().addTo(map);
+    var densityLayer = L.geoJSON(null).addTo(map);
 
     function clearMap() {
         drawnItems.clearLayers();
         buildingsLayer.clearLayers();
         clusterLayer.clearLayers();
+        densityLayer.clearLayers();
     }
 
     function addOABoundary(layer, latlngs) {
         oaLatLangs = latlngs;
     }
 
+    let isDrawing = false;
+    map.on(L.Draw.Event.DRAWSTART, function (e) {
+        isDrawing = true;
+    });
+
     // When a polygon is drawn
     map.on(L.Draw.Event.CREATED, function (event) {
+        isDrawing = false
         clearMap()
         // Get polygon coordinates
         var latlngs = event.layer.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);
@@ -167,9 +194,76 @@
         });
     });
 
+    function addBuildings(data) {
+        // Overlay building polygons
+        if (data.buildings) {
+            // Ensure that each feature gets the corresponding cluster label
+            data.buildings.features.forEach((feature, index) => {
+                feature.properties.cluster_label = data.buildings.cluster_label[index]; // Assign label to properties
+            });
+
+            // Now, render the GeoJSON with updated cluster labels
+            L.geoJSON(data.buildings, {
+                style: function (feature) {
+                    const clusterLabel = feature.properties.cluster_label; // Access updated label
+                    return {
+                        color: getColorForNumber(clusterLabel), // Assign color based on cluster
+                        weight: 1,
+                        fillOpacity: 0.9
+                    };
+                }
+            }).addTo(buildingsLayer);
+        }
+    }
+
+
+    function addClusters(data) {
+        if (data.clusters) {
+            const clusterGroups = {};
+
+            // Group points by cluster ID and calculate number of buildings per cluster
+            data.clusters.forEach(feature => {
+                const {cluster, coordinates, numOfBuildings} = feature;
+
+                if (clusteringType != 'dbScan' || cluster != -1) {
+                    if (!clusterGroups[cluster]) {
+                        clusterGroups[cluster] = {points: [], numOfBuildings: 0};
+                    }
+
+                    clusterGroups[cluster].points.push(coordinates);
+                    clusterGroups[cluster].numOfBuildings = numOfBuildings;
+
+                }
+            });
+
+            // Draw cluster boundaries and popups
+            Object.entries(clusterGroups).forEach(([clusterId, {points, numOfBuildings}]) => {
+                if (points.length > 2) {
+                    const turfPoints = points.map(p => turf.point(p));
+                    const featureCollection = turf.featureCollection(turfPoints);
+                    const boundary = turf.convex(featureCollection);
+
+                    if (boundary) {
+                        // Use your vibrant color function
+                        const color = getColorForNumber(parseInt(clusterId)); // Assuming you have this function
+
+                        // Add boundary layer
+                        const boundaryLayer = L.geoJSON(boundary, {color: color, fillOpacity: 0});
+                        boundaryLayer.bindPopup(`Cluster ${clusterId} \n Number of Buildings: ${numOfBuildings}`);
+                        clusterLayer.addLayer(boundaryLayer);
+                    }
+                }
+            });
+        }
+    }
+
     function fetchData(polygon) {
-        if ( polygon.length == 0 || !polygon) {
-            polygon = [[7.480294704437257,9.084527915967186],[7.480294704437257,9.092282829384425],[7.504327297210694,9.092282829384425],[7.504327297210694,9.084527915967186],[7.480294704437257,9.084527915967186]]
+
+        if (polygon.length == 0 || !polygon) {
+            clearMap()
+            // polygon = [[8.514895308762789,9.839524774465382],[8.534482140094042,9.837415354216892],[8.535140622407198,9.826819818911336],[8.517128080129625,9.829515521001792],[8.514895308762789,9.839524774465382]]
+            polygon = [[7.480294704437257, 9.084527915967186], [7.480294704437257, 9.092282829384425], [7.504327297210694, 9.092282829384425], [7.504327297210694, 9.084527915967186], [7.480294704437257, 9.084527915967186]]
+
         }
         var polygonLatLng = polygon.map(coord => [coord[1], coord[0]]);
         var polygonLayer = L.polygon(polygonLatLng, {
@@ -184,103 +278,110 @@
         let clusteringType = document.getElementById("clusteringType").value;
         let noOfClusters = document.getElementById("noOfClusters").value;
         let noOfBuildings = document.getElementById("noOfBuildings").value;
+        let gridLength = document.getElementById("gridLength").value;
         if (!thresholdVal) thresholdVal = 0.5
         fetch('https://map-clustering.onrender.com/get_building_density', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ polygon, thresholdVal, clusteringType, noOfClusters, noOfBuildings })
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({polygon, thresholdVal, clusteringType, noOfClusters, noOfBuildings, gridLength})
         })
-        .then(response => response.json())
-        .then(data => {
-            if (data.building_count !== undefined) {
-                document.getElementById('building-count').innerText = data.building_count;
-            } else {
-                document.getElementById('building-count').innerText = "Error fetching data";
-            }
-
-            // Overlay building polygons
-            if (data.buildings) {
-                // Ensure that each feature gets the corresponding cluster label
-                data.buildings.features.forEach((feature, index) => {
-                    feature.properties.cluster_label = data.buildings.cluster_label[index]; // Assign label to properties
-                });
-
-                // Now, render the GeoJSON with updated cluster labels
-                L.geoJSON(data.buildings, {
-                    style: function (feature) {
-                        const clusterLabel = feature.properties.cluster_label; // Access updated label
-                        return {
-                            color: getColorForNumber(clusterLabel), // Assign color based on cluster
-                            weight: 1,
-                            fillOpacity: 0.4
-                        };
+                .then(response => response.json())
+                .then(data => {
+                    if (data.building_count !== undefined) {
+                        document.getElementById('building-count').innerText = data.building_count;
+                    } else {
+                        document.getElementById('building-count').innerText = "Error fetching data";
                     }
-                }).addTo(buildingsLayer);
-            }
-
-
-            // Overlay clusters
-            if (data.clusters) {
-                const clusterGroups = {};
-
-                // Group points by cluster ID and calculate number of buildings per cluster
-                data.clusters.forEach(feature => {
-                    const { cluster, coordinates, numOfBuildings } = feature;
-
-                    if ( clusteringType != 'dbScan' ||  cluster != -1) {
-                        if (!clusterGroups[cluster]) {
-                            clusterGroups[cluster] = { points: [], numOfBuildings: 0 };
-                        }
-                        
-                        clusterGroups[cluster].points.push(coordinates);
-                        clusterGroups[cluster].numOfBuildings = numOfBuildings;
-                                            
-                    }
-                });
-
-                // Draw cluster boundaries and popups
-                Object.entries(clusterGroups).forEach(([clusterId, { points, numOfBuildings }]) => {
-                    if (points.length > 2) {
-                        var boundary = turf.convex(turf.featureCollection(points.map(p => turf.point(p))));
-                        if (boundary) {
-                            let color = 'blue'
-                            if(clusteringType == 'balancedKMeans') {
-                                color = 'red'
+                    addBuildings(data);
+                    addClusters(data);
+                    if (data.grids) {
+                        L.geoJSON(data.grids, {
+                            style: function (feature) {
+                                return {
+                                    color: "blue",
+                                    weight: 1,
+                                    fillOpacity: 0
+                                };
                             }
-                            var boundaryLayer = L.geoJSON(boundary, { color: color, fillOpacity: 0 });
-                            boundaryLayer.bindPopup(`Cluster ${clusterId} \n Number of Buildings: ${numOfBuildings}`);
-                            clusterLayer.addLayer(boundaryLayer);
-                        }
+                        }).addTo(densityLayer);
                     }
-                });
-            }
+                })
+                .catch(error => console.error('Error:', error));
+    }
+
+    function getGrids(polygon) {
+        if (polygon.length == 0 || !polygon) {
+            clearMap()
+            // polygon = [[8.514895308762789,9.839524774465382],[8.534482140094042,9.837415354216892],[8.535140622407198,9.826819818911336],[8.517128080129625,9.829515521001792],[8.514895308762789,9.839524774465382]]
+            polygon = [[7.480294704437257, 9.084527915967186], [7.480294704437257, 9.092282829384425], [7.504327297210694, 9.092282829384425], [7.504327297210694, 9.084527915967186], [7.480294704437257, 9.084527915967186]]
+
+        }
+        let gridLength = document.getElementById("gridLength").value;
+        fetch('https://map-clustering.onrender.com/get_grids', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({polygon, gridLength})
         })
-        .catch(error => console.error('Error:', error));
+                .then(response => response.json())
+                .then(data => {
+                    if (data.grids) {
+                        L.geoJSON(data.grids, {
+                            style: function (feature) {
+                                return {
+                                    color: "blue",
+                                    weight: 1,
+                                    fillOpacity: 0
+                                };
+                            }
+                        }).addTo(densityLayer);
+                    }
+                })
+                .catch(error => console.error('Error:', error));
     }
 
     function getColorForNumber(num) {
-        if (num == 0) return 'red'
-        if (num ==1) return 'green'
-        if (num == 2) return 'blue'
-        if (num == -1) return 'purple'
-        // Generate RGB values in the dark range (0-100)
-        let r = (num * 67) % 100; // Red component
-        let g = (num * 97) % 100; // Green component
-        let b = (num * 137) % 100; // Blue component
+        // Special cases for specific numbers (optional, kept from your original)
+        // if (num === 0) return 'red';     // #ff0000
+        // if (num === 1) return 'green';   // #00ff00
+        // if (num === 2) return 'blue';    // #0000ff
+        // if (num === -1) return 'purple'; // #800080
 
-        // Convert values to two-digit hex (ensuring dark shades)
-        const toHex = (value) => ('0' + value.toString(16)).slice(-2); 
+        // Use HSL to generate distinct colors for each cluster
+        const hue = (num * 137) % 360; // Spread hues across 0–360°, 137 is a prime for good distribution
+        const saturation = 70;         // 70% saturation for vibrant colors
+        const lightness = 50;          // 50% lightness for balanced brightness
 
-        return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+        // Convert HSL to RGB
+        const hslToRgb = (h, s, l) => {
+            s /= 100;
+            l /= 100;
+            const c = (1 - Math.abs(2 * l - 1)) * s; // Chroma
+            const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+            const m = l - c / 2;
+            let r, g, b;
+
+            if (h >= 0 && h < 60) [r, g, b] = [c, x, 0];
+            else if (h < 120) [r, g, b] = [x, c, 0];
+            else if (h < 180) [r, g, b] = [0, c, x];
+            else if (h < 240) [r, g, b] = [0, x, c];
+            else if (h < 300) [r, g, b] = [x, 0, c];
+            else [r, g, b] = [c, 0, x];
+
+            // Convert to 0–255 range and to hex
+            const toHex = (value) => ('0' + Math.round((value + m) * 255).toString(16)).slice(-2);
+            return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+        };
+
+        return hslToRgb(hue, saturation, lightness);
     }
 
     function setupIndex(data, index, type) {
         index.load(data.features.map(f => {
             const coords = f.geometry.coordinates;
-            const [minLng, minLat, maxLng, maxLat] = type === 'point' 
-                ? [coords[0], coords[1], coords[0], coords[1]]
-                : turf.bbox(f);
-            return { minX: minLng, minY: minLat, maxX: maxLng, maxY: maxLat, feature: f };
+            const [minLng, minLat, maxLng, maxLat] = type === 'point'
+                    ? [coords[0], coords[1], coords[0], coords[1]]
+                    : turf.bbox(f);
+            return {minX: minLng, minY: minLat, maxX: maxLng, maxY: maxLat, feature: f};
         }));
     }
 
@@ -291,21 +392,22 @@
             loadedWardsBounds = null;
             return;
         }
-        
+
         const bounds = map.getBounds();
         if (loadedWardsBounds && loadedWardsBounds.contains(bounds)) {
             return;
         }
 
         const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
-        const visible = wardsIndex.search({ minX: bbox[0], minY: bbox[1], maxX: bbox[2], maxY: bbox[3] })
-            .map(item => item.feature);
+        const visible = wardsIndex.search({minX: bbox[0], minY: bbox[1], maxX: bbox[2], maxY: bbox[3]})
+                .map(item => item.feature);
 
         if (!wardsLayer) wardsLayer = L.geoJson(null, {
-            style: { color: "black", weight: 1, fillOpacity: 0, dashArray: "4,4" },
+            style: {color: "black", weight: 1, fillOpacity: 0, dashArray: "4,4"},
+            interactive: false,
             onEachFeature: (feature, layer) => layer.bindPopup(feature.properties.ward_name)
         }).addTo(map);
-        wardsLayer.clearLayers().addData({ type: "FeatureCollection", features: visible });
+        wardsLayer.clearLayers().addData({type: "FeatureCollection", features: visible});
         loadedWardsBounds = bounds;
     }
 
@@ -316,24 +418,24 @@
             loadedHealthBounds = null;
             return;
         }
-        
+
         const bounds = map.getBounds();
         if (loadedHealthBounds && loadedHealthBounds.contains(bounds)) {
             return;
         }
 
         const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
-        const visible = facilitiesIndex.search({ minX: bbox[0], minY: bbox[1], maxX: bbox[2], maxY: bbox[3] })
-            .map(item => item.feature);
+        const visible = facilitiesIndex.search({minX: bbox[0], minY: bbox[1], maxX: bbox[2], maxY: bbox[3]})
+                .map(item => item.feature);
 
         if (!healthFacilitiesLayer) {
-            healthFacilitiesLayer = L.markerClusterGroup({ maxClusterRadius: 40 }).addTo(map);
+            healthFacilitiesLayer = L.markerClusterGroup({maxClusterRadius: 40}).addTo(map);
         }
-        healthFacilitiesLayer.clearLayers().addLayers(visible.map(f => 
-            L.marker([f.geometry.coordinates[1], f.geometry.coordinates[0]])
-                .bindPopup(`<b>${f.properties.name}</b><br>Ward: ${f.properties.ward_name}`)
+        healthFacilitiesLayer.clearLayers().addLayers(visible.map(f =>
+                L.marker([f.geometry.coordinates[1], f.geometry.coordinates[0]])
+                        .bindPopup(`<b>${f.properties.name}</b><br>Ward: ${f.properties.ward_name}`)
         ));
-        
+
         loadedHealthBounds = bounds;
     }
 
@@ -345,6 +447,61 @@
         };
     }
 
+
+    // map.on('click', function(e) {
+    //     if(isDrawing) return;
+    //     var lat = e.latlng.lat;
+    //     var lng = e.latlng.lng;
+
+    //     // Remove existing markers before adding a new one
+    //     if (window.currentMarker) {
+    //         map.removeLayer(window.currentMarker);
+    //     }
+
+    //     // Drop a new pin (marker)
+    //     window.currentMarker = L.marker([lat, lng]).addTo(map)
+    //         .bindPopup(`Dropped Pin<br>Lat: ${lat}, Lng: ${lng}`)
+    //         .openPopup();
+    //     sendCoordinatesToBackend(lat, lng)
+    // });
+
+    function sendCoordinatesToBackend(lat, lng) {
+        var algo = document.getElementById("clusteringType").value;
+        fetch('https://map-clustering.onrender.com/get_cluster', { // Replace with your backend API
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({lat: lat, lon: lng, algo})
+        })
+                .then(response => response.json())
+                .then(data => {
+                    clearMap()
+                    document.getElementById('building-count').innerText = data.building_count;
+                    L.geoJSON(data.buildings, {
+                        style: function (feature) {
+                            return {
+                                color: 'red',
+                                weight: 1,
+                                fillOpacity: 0.4
+                            };
+                        }
+                    }).addTo(buildingsLayer);
+
+                    let boundary = turf.convex(data.buildings);
+
+                    if (boundary) {
+                        L.geoJSON(boundary, {
+                            style: {
+                                color: 'blue',  // Boundary color
+                                weight: 1,
+                                fillOpacity: 0.1
+                            }
+                        }).addTo(clusterLayer);
+                    }
+                })
+                .catch(error => console.error('Error sending coordinates:', error));
+    }
 </script>
 
 </body>

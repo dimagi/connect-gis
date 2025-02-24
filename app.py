@@ -1,12 +1,18 @@
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import numpy as np
+import pandas as pd
 from sklearn.cluster import AgglomerativeClustering, KMeans, DBSCAN
 from scipy.cluster.hierarchy import linkage, fcluster
 import ee
 from collections import Counter
 from sklearn.metrics import pairwise_distances
 import os
+from sklearn.neighbors import NearestNeighbors
+from k_means_constrained import KMeansConstrained
+import math
+import geopandas as gpd
+from shapely.geometry import Polygon
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 try:
@@ -31,39 +37,136 @@ except Exception as e:
 def home():
     return render_template("index.html")
 
-def optimized_balanced_kmeans1(buildingsGDF, coords, num_clusters=3, max_iter=300, balance_tolerance=0.05):
+def create_grid_in_cluster(gdf, cluster_num, grid_size=15):
+    """
+    Create a 15m x 15m grid within a cluster, only for cells containing buildings.
+
+    Parameters:
+    - gdf: GeoDataFrame with 'cluster' column and geometry
+    - cluster_num: Integer, the cluster number to grid
+    - grid_size: Float, size of grid cells in meters (default: 15)
+
+    Returns:
+    - GeoDataFrame with grid polygons containing buildings
+    """
+    # Filter buildings in the specified cluster
+    cluster_gdf = gdf[gdf['cluster'] == cluster_num]
+
+    # Get the bounding box of the cluster
+    bounds = cluster_gdf.total_bounds  # [minx, miny, maxx, maxy]
+    minx, miny, maxx, maxy = bounds
+
+    # Adjust bounds to align with grid_size
+    minx = np.floor(minx / grid_size) * grid_size
+    miny = np.floor(miny / grid_size) * grid_size
+    maxx = np.ceil(maxx / grid_size) * grid_size
+    maxy = np.ceil(maxy / grid_size) * grid_size
+
+    # Generate grid coordinates
+    x_coords = np.arange(minx, maxx + grid_size, grid_size)
+    y_coords = np.arange(miny, maxy + grid_size, grid_size)
+
+    # Create grid polygons and filter those with buildings
+    grid_polygons = []
+    for x in x_coords[:-1]:
+        for y in y_coords[:-1]:
+            square = Polygon([
+                (x, y),
+                (x + grid_size, y),
+                (x + grid_size, y + grid_size),
+                (x, y + grid_size)
+            ])
+            # Check if any building intersects this grid cell
+            if cluster_gdf.intersects(square).any():
+                grid_polygons.append(square)
+
+    # Create a GeoDataFrame for the grid
+    if not grid_polygons:  # Handle case with no valid grids
+        return gpd.GeoDataFrame({'geometry': [], 'cluster': []}, crs=gdf.crs)
+    grid_gdf = gpd.GeoDataFrame({'geometry': grid_polygons, 'cluster': cluster_num}, crs=gdf.crs)
+    return grid_gdf
+
+def add_grids_to_clusters(buildingsGDF, grid_size=15):
+    """
+    Add 15m grids to all clusters, only where buildings exist.
+
+    Parameters:
+    - buildingsGDF: GeoDataFrame with 'cluster' column
+    - grid_size: Float, size of grid cells in meters (default: 15)
+
+    Returns:
+    - GeoDataFrame with grid polygons for all clusters
+    """
+    unique_clusters = buildingsGDF['cluster'].unique()
+    grid_gdfs = [create_grid_in_cluster(buildingsGDF, cluster, grid_size) for cluster in unique_clusters]
+    return gpd.GeoDataFrame(pd.concat(grid_gdfs, ignore_index=True), crs=buildingsGDF.crs)
+
+
+def optimized_balanced_kmeans_constrained_with_buildings_count(buildingsGDF, coords, buildings_per_cluster, balance_tolerance=0.05):
+    """
+    Perform balanced K-means clustering with a fixed number of buildings per cluster.
+
+    Parameters:
+    - coords: numpy array of coordinates (n_samples, 2)
+    - buildings_per_cluster: integer, number of buildings required in each cluster
+
+    Returns:
+    - GeoDataFrame with cluster labels
+    """
+    # Calculate number of samples and clusters
+    n_samples = len(coords)
+    num_clusters = math.ceil(n_samples / buildings_per_cluster)   # Integer division to determine clusters
+    base_size = n_samples // num_clusters  # Base size for each cluster
+    min_size = int(base_size * (1 - balance_tolerance))
+    max_size = int(base_size * (1 + balance_tolerance))
+
+    # Initialize Constrained K-means with exact size constraint
+    constrained_kmeans = KMeansConstrained(
+        n_clusters=num_clusters,
+        size_min=min_size,  # Exact minimum size
+        size_max=max_size,  # Exact maximum size (forcing equality)
+        max_iter=300,  # Fixed max iterations
+        random_state=42,  # For reproducibility
+        n_init=1,  # Number of initializations (integer for compatibility with 0.7.5)
+        n_jobs=1
+    )
+
+    # Fit and predict cluster labels
+    labels = constrained_kmeans.fit_predict(coords)
+    return getClusters(buildingsGDF, coords, labels)
+
+def optimized_balanced_kmeans_constrained_with_no_of_clusters(buildingsGDF, coords, num_clusters=3, balance_tolerance=0.05):
+    """
+    Perform balanced K-means clustering with size constraints using minimum cost flow.
+
+    Parameters:
+    - buildingsGDF: GeoDataFrame containing building data
+    - coords: numpy array of coordinates (n_samples, 2)
+    - num_clusters: number of clusters (default: 3)
+    - max_iter: maximum iterations for K-means (default: 300)
+    - balance_tolerance: tolerance for cluster size variation (default: 0.05)
+
+    Returns:
+    - buildingsGDF with cluster labels
+    """
+    # Calculate ideal cluster size and bounds
     n_samples = len(coords)
     ideal_size = n_samples // num_clusters
-    lower_bound = int(ideal_size * (1 - balance_tolerance))
-    upper_bound = int(ideal_size * (1 + balance_tolerance))
+    min_size = int(ideal_size * (1 - balance_tolerance))
+    max_size = int(ideal_size * (1 + balance_tolerance))
 
-    # Step 1: Initial KMeans Clustering
-    kmeans = KMeans(n_clusters=num_clusters, random_state=42, n_init='auto', max_iter=max_iter)
-    labels = kmeans.fit_predict(coords)
+    # Initialize Constrained K-means with size constraints
+    constrained_kmeans = KMeansConstrained(
+        n_clusters=num_clusters,
+        size_min=min_size,  # Minimum number of points per cluster
+        size_max=max_size,  # Maximum number of points per cluster
+        max_iter=300,
+        random_state=42,
+        n_init=1  # Automatically choose number of initializations
+    )
 
-    # Step 2: Balancing without Overlaps
-    cluster_counts = np.bincount(labels, minlength=num_clusters)
-
-    for i in range(num_clusters):
-        while cluster_counts[i] > upper_bound:
-            # Find the furthest point in the over-full cluster
-            cluster_i_indices = np.where(labels == i)[0]
-            distances = pairwise_distances(coords[cluster_i_indices], [kmeans.cluster_centers_[i]])
-            furthest_idx = np.argmax(distances)
-            point_to_move_idx = cluster_i_indices[furthest_idx]
-
-            # Find the closest under-full cluster
-            distances_to_other_clusters = pairwise_distances([coords[point_to_move_idx]], kmeans.cluster_centers_)
-            distances_to_other_clusters[0, i] = np.inf  # Exclude the current cluster
-            closest_cluster = np.argmin(distances_to_other_clusters)
-
-            # Check if moving the point maintains non-overlapping clusters
-            if cluster_counts[closest_cluster] < upper_bound:
-                # Move the point
-                labels[point_to_move_idx] = closest_cluster
-                cluster_counts[i] -= 1
-                cluster_counts[closest_cluster] += 1
-
+    # Fit and predict cluster labels
+    labels = constrained_kmeans.fit_predict(coords)
     return getClusters(buildingsGDF, coords, labels)
 
 def balanced_kmeans(buildingsGDF, coords, num_clusters=3):
@@ -188,14 +291,65 @@ def cluster_buildings_kMeans(buildingsGDF, coords, num_clusters=3):
     cluster_labels = kmeans.fit_predict(coords)
     return  getClusters(buildingsGDF, coords, cluster_labels)
 
+import ee
+
+def getGrids(region, filtered_buildings, grid_size=50):
+    """
+    Generate 50m x 50m grids with building counts within a region, optimized for speed.
+
+    Args:
+        region (ee.Geometry): The polygon area to analyze.
+        filtered_buildings (ee.FeatureCollection): Buildings within the region.
+        grid_size (float, optional): Grid cell size in meters. Defaults to 50.
+
+    Returns:
+        list: GeoJSON features with grid geometry (EPSG:4326) and building counts.
+
+    Raises:
+        ee.EEException: If Earth Engine fails to process or retrieve grid data.
+    """
+    # Get centroid and determine UTM CRS
+    centroid = region.centroid().coordinates().getInfo()
+    utm_zone = int((centroid[0] + 180) / 6) + 1
+    utm_crs = f'EPSG:326{utm_zone:02d}' if centroid[1] >= 0 else f'EPSG:327{utm_zone:02d}'
+
+    # Create grid from building centroids in UTM
+    grid_cells = filtered_buildings.map(lambda f: f.centroid()).geometry().coveringGrid(utm_crs, grid_size)
+
+    # Count buildings and filter occupied cells, transform to EPSG:4326 in one map
+    density_cells = grid_cells.map(
+        lambda cell: cell.set(
+            "count",
+            filtered_buildings.filterBounds(cell.geometry()).size()
+        )
+    ).filter(ee.Filter.gt('count', 0)).map(
+        lambda feature: feature.setGeometry(feature.geometry().transform('EPSG:4326', 1))
+    )
+
+    # Convert to GeoJSON and format features
+    try:
+        geojson_data = density_cells.getInfo()
+        return [
+            {
+                "type": "Feature",
+                "geometry": feature["geometry"],
+                "properties": {"count": feature["properties"]["count"]}
+            }
+            for feature in geojson_data["features"]
+        ]
+    except ee.EEException as e:
+        raise ee.EEException(f"Failed to convert grids to GeoJSON: {str(e)}")
+
+
 @app.route('/get_building_density', methods=['POST'])
 def get_building_density():
     data = request.get_json()
     polygon_coords = data.get("polygon", [])
     thresholdVal = float(data.get("thresholdVal"))
     clusteringType = data.get("clusteringType")
-    noOfClusters = data.get("noOfClusters")
-    noOfBuildings = data.get("noOfBuildings")
+    noOfClusters = int(data.get("noOfClusters"))
+    noOfBuildings = int(data.get("noOfBuildings"))
+    gridSize = int(data.get("gridLength"))
     if not polygon_coords:
         return jsonify({"error": "Invalid polygon coordinates"}), 400
 
@@ -207,21 +361,20 @@ def get_building_density():
     buildings_geojson = filtered_buildings.getInfo()
     coordinates = [feature['properties']['longitude_latitude']['coordinates'] for feature in buildings_geojson['features']]
 
-    # buildingsGDF = gdf_from_db(polygon_coords)
-    # coordinates = buildingsGDF[['longitude', 'latitude']].values.tolist()
-
     if not coordinates:
         return jsonify({"message": "No buildings found within the polygon"}), 404
-    coordinates = np.array(coordinates)
+    coordinates = np.array(coordinates, copy=True)
     buildingsCount = len(coordinates)
-    kVal = int(buildingsCount/int(noOfBuildings))
+    kVal = int(buildingsCount/noOfBuildings)
     # Perform clustering (or any other processing) as needed
+    clusters = None
     if(clusteringType == 'kMeans'):
-        clusters = cluster_buildings_kMeans(buildings_geojson, coordinates, int(noOfClusters))
+        # clusters = cluster_buildings_kMeans(buildings_geojson, coordinates, noOfClusters)
+        clusters = optimized_balanced_kmeans_constrained_with_no_of_clusters(buildings_geojson, coordinates, noOfClusters, float(thresholdVal/100))
     elif(clusteringType == 'greedyDivision'):
         clusters = cluster_buildings_kMeans(buildings_geojson, coordinates, int(kVal))
     elif(clusteringType == 'balancedKMeans'):
-        clusters = optimized_balanced_kmeans1(buildings_geojson, coordinates, balance_tolerance=float(thresholdVal/100))
+        clusters = optimized_balanced_kmeans_constrained_with_buildings_count(buildings_geojson, coordinates, noOfBuildings, float(thresholdVal/100))
     elif (clusteringType == 'hierarchicalClustering'):
         clusters = cluster_buildings_with_size(buildings_geojson, coordinates, 100, thresholdVal)
     elif (clusteringType == 'dbScan'):
@@ -230,7 +383,24 @@ def get_building_density():
     return jsonify({
         "building_count": buildingsCount,
         "buildings": buildings_geojson,
-        "clusters": clusters,
+        "clusters": clusters
+    })
+
+@app.route('/get_grids', methods=['POST'])
+def getGridsData():
+    data = request.get_json()
+    polygon_coords = data.get("polygon", [])
+    gridSize = int(data.get("gridLength"))
+    if not polygon_coords:
+        return jsonify({"error": "Invalid polygon coordinates"}), 400
+
+    # Create EE Polygon geometry
+    region = ee.Geometry.Polygon(polygon_coords)
+    # Filter buildings inside the polygon
+    filtered_buildings = buildings.filterBounds(region)
+    grids = getGrids(region, filtered_buildings, gridSize)
+    return jsonify({
+        "grids": grids
     })
 
 
