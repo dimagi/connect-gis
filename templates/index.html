@@ -17,7 +17,7 @@
 
     <script src="https://unpkg.com/rbush@3.0.1/rbush.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
-    <script src="https://unpkg.com/proj4@2.9.0/dist/proj4.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/toastify-js@1.12.0/src/toastify.min.js"></script>
     <style>
         #map {
             height: 500px;
@@ -80,7 +80,7 @@
     <br>
 </div>
 
-<button onclick="fetchData(oaLatLangs)">Run Clustering</button>
+<button onclick="fetchData(oaLatLangs, false)">Run Clustering</button>
 <button onclick="getGrids(oaLatLangs)">Get Grids</button>
 <button onclick="clearMap()">Clear Map</button>
 
@@ -178,7 +178,7 @@
         var latlngs = event.layer.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);
         latlngs.push(latlngs[0]); // Close the polygon
         addOABoundary(event.layer, latlngs)
-        fetchData(latlngs)
+        fetchData(latlngs, true)
     });
 
     map.on('draw:edited', function (e) {
@@ -189,7 +189,7 @@
             if (layer instanceof L.Polygon) {
                 var latlngs = layer.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);
                 addOABoundary(layer, latlngs)
-                fetchData(latlngs)
+                fetchData(latlngs, true)
             }
         });
     });
@@ -257,8 +257,10 @@
         }
     }
 
-    function fetchData(polygon) {
-
+    function fetchData(polygon, clearMapData) {
+        if (!clearMapData) {
+            clearMap()
+        }
         if (polygon.length == 0 || !polygon) {
             clearMap()
             // polygon = [[8.514895308762789,9.839524774465382],[8.534482140094042,9.837415354216892],[8.535140622407198,9.826819818911336],[8.517128080129625,9.829515521001792],[8.514895308762789,9.839524774465382]]
@@ -502,6 +504,19 @@
                 })
                 .catch(error => console.error('Error sending coordinates:', error));
     }
+
+    function showToast(message, duration = 3000, style = {}) {
+        Toastify({
+            text: message,
+            duration: duration,
+            close: true,
+            gravity: "top",
+            position: "right",
+            stopOnFocus: true,
+            style: style
+        }).showToast();
+    }
+
 </script>
 
 </body>
