@@ -17,7 +17,7 @@
 
     <script src="https://unpkg.com/rbush@3.0.1/rbush.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/toastify-js@1.12.0/src/toastify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <style>
         #map {
             height: 500px;
@@ -31,6 +31,11 @@
 
         .hidden {
             display: none;
+        }
+
+        .swal-toast {
+            border-radius: 5px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
         }
     </style>
 </head>
@@ -85,6 +90,7 @@
 <button onclick="clearMap()">Clear Map</button>
 
 <script>
+    const hostUrl = "https://map-clustering.onrender.com/get_grids"
 
     function toggleInputFields() {
         var method = document.getElementById("clusteringType").value;
@@ -259,43 +265,56 @@
 
     function fetchData(polygon, clearMapData) {
         if (!clearMapData) {
-            clearMap()
+            clearMap();
         }
-        if (polygon.length == 0 || !polygon) {
-            clearMap()
-            // polygon = [[8.514895308762789,9.839524774465382],[8.534482140094042,9.837415354216892],[8.535140622407198,9.826819818911336],[8.517128080129625,9.829515521001792],[8.514895308762789,9.839524774465382]]
-            polygon = [[7.480294704437257, 9.084527915967186], [7.480294704437257, 9.092282829384425], [7.504327297210694, 9.092282829384425], [7.504327297210694, 9.084527915967186], [7.480294704437257, 9.084527915967186]]
+        if (!polygon || polygon.length === 0) {
+            clearMap();
+            polygon = [
+                [7.480294704437257, 9.084527915967186],
+                [7.480294704437257, 9.092282829384425],
+                [7.504327297210694, 9.092282829384425],
+                [7.504327297210694, 9.084527915967186],
+                [7.480294704437257, 9.084527915967186]
+            ];
+        }
 
-        }
         var polygonLatLng = polygon.map(coord => [coord[1], coord[0]]);
         var polygonLayer = L.polygon(polygonLatLng, {
-            color: 'blue',          // Border color
+            color: 'blue',
             weight: 1,
             fillOpacity: 0
         }).addTo(drawnItems);
 
-        // Fit the map to the polygon bounds
         map.fitBounds(polygonLayer.getBounds());
-        let thresholdVal = document.getElementById("thresholdVal").value;
+
+        let thresholdVal = document.getElementById("thresholdVal").value || 0.5;
         let clusteringType = document.getElementById("clusteringType").value;
         let noOfClusters = document.getElementById("noOfClusters").value;
         let noOfBuildings = document.getElementById("noOfBuildings").value;
         let gridLength = document.getElementById("gridLength").value;
-        if (!thresholdVal) thresholdVal = 0.5
-        fetch('https://map-clustering.onrender.com/get_building_density', {
+
+        showToast('Fetching data...', 'info', undefined, '#ff9300');
+
+        fetch(`${hostUrl}/get_building_density`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({polygon, thresholdVal, clusteringType, noOfClusters, noOfBuildings, gridLength})
         })
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) throw new Error(`Failed to fetch data: ${response.statusText}`);
+                    return response.json();
+                })
                 .then(data => {
-                    if (data.building_count !== undefined) {
-                        document.getElementById('building-count').innerText = data.building_count;
-                    } else {
-                        document.getElementById('building-count').innerText = "Error fetching data";
-                    }
+                    Swal.close();
+                    showToast('Data loaded!', 'success', 2000, '#006400');
+
+                    document.getElementById('building-count').innerText = data.building_count !== undefined
+                            ? data.building_count
+                            : "Error fetching data";
+
                     addBuildings(data);
                     addClusters(data);
+
                     if (data.grids) {
                         L.geoJSON(data.grids, {
                             style: function (feature) {
@@ -308,24 +327,63 @@
                         }).addTo(densityLayer);
                     }
                 })
-                .catch(error => console.error('Error:', error));
+                .catch(error => {
+                    Swal.close();
+                    showToast(`Error: ${error.message}`, 'error', 5000, '#FF0000', '300px');
+
+                    console.error('Error:', error);
+                    document.getElementById('building-count').innerText = "Error fetching data";
+                });
+    }
+
+    // Reusable toast function
+    function showToast(title, icon, timer, background, width = '250px') {
+        Swal.fire({
+            toast: true,
+            position: 'bottom-start',  // Bottom-left
+            title: title,
+            icon: icon,
+            showConfirmButton: false,
+            timer: timer,
+            width: width,
+            padding: '5px',  // Reduced for smaller height
+            background: background,
+            color: '#FFFFFF',  // White text
+            customClass: {popup: 'swal-toast'}
+        });
     }
 
     function getGrids(polygon) {
-        if (polygon.length == 0 || !polygon) {
-            clearMap()
-            // polygon = [[8.514895308762789,9.839524774465382],[8.534482140094042,9.837415354216892],[8.535140622407198,9.826819818911336],[8.517128080129625,9.829515521001792],[8.514895308762789,9.839524774465382]]
-            polygon = [[7.480294704437257, 9.084527915967186], [7.480294704437257, 9.092282829384425], [7.504327297210694, 9.092282829384425], [7.504327297210694, 9.084527915967186], [7.480294704437257, 9.084527915967186]]
-
+        if (!polygon || polygon.length === 0) {
+            polygon = [
+                [7.480294704437257, 9.084527915967186],
+                [7.480294704437257, 9.092282829384425],
+                [7.504327297210694, 9.092282829384425],
+                [7.504327297210694, 9.084527915967186],
+                [7.480294704437257, 9.084527915967186]
+            ];
         }
+
         let gridLength = document.getElementById("gridLength").value;
-        fetch('https://map-clustering.onrender.com/get_grids', {
+
+        // Show fetching toast
+        showToast('Fetching grids...', 'info', undefined, '#ff9300');
+
+        fetch(`${hostUrl}/get_grids`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({polygon, gridLength})
         })
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) throw new Error('Failed to fetch grids');
+                    return response.json();
+                })
                 .then(data => {
+                    // Close fetching toast and show success toast
+                    Swal.close();
+                    showToast('Grids loaded!', 'success', 2000, '#006400');
+
+                    densityLayer.clearLayers();
                     if (data.grids) {
                         L.geoJSON(data.grids, {
                             style: function (feature) {
@@ -338,7 +396,13 @@
                         }).addTo(densityLayer);
                     }
                 })
-                .catch(error => console.error('Error:', error));
+                .catch(error => {
+                    // Close fetching toast and show error toast
+                    Swal.close();
+                    showToast(`Error: ${error.message}`, 'error', 5000, '#FF0000', '300px');
+
+                    console.error('Error:', error);
+                });
     }
 
     function getColorForNumber(num) {
@@ -469,7 +533,7 @@
 
     function sendCoordinatesToBackend(lat, lng) {
         var algo = document.getElementById("clusteringType").value;
-        fetch('https://map-clustering.onrender.com/get_cluster', { // Replace with your backend API
+        fetch('http://127.0.0.1:5000/get_cluster', { // Replace with your backend API
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -503,18 +567,6 @@
                     }
                 })
                 .catch(error => console.error('Error sending coordinates:', error));
-    }
-
-    function showToast(message, duration = 3000, style = {}) {
-        Toastify({
-            text: message,
-            duration: duration,
-            close: true,
-            gravity: "top",
-            position: "right",
-            stopOnFocus: true,
-            style: style
-        }).showToast();
     }
 
 </script>
