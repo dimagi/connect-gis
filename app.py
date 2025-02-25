@@ -431,7 +431,7 @@ def getGridsData():
     filtered_buildings = buildings.filterBounds(region)
 
     try:
-        grids = getGridsFromGEE(region, filtered_buildings, gridSize)
+        grids = getGrids(region, filtered_buildings, gridSize)
         return jsonify({"grids": grids})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
