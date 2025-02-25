@@ -222,6 +222,19 @@
         }
     }
 
+    function addGrids(data) {
+        if (data.grids) {
+            L.geoJSON(data.grids, {
+                style: function (feature) {
+                    return {
+                        color: "blue",
+                        weight: 1,
+                        fillOpacity: 0
+                    };
+                }
+            }).addTo(densityLayer);
+        }
+    }
 
     function addClusters(data) {
         if (data.clusters) {
@@ -300,31 +313,22 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({polygon, thresholdVal, clusteringType, noOfClusters, noOfBuildings, gridLength})
         })
-                .then(response => {
-                    if (!response.ok) throw new Error(`Failed to fetch data: ${response.statusText}`);
-                    return response.json();
-                })
+                .then(response => response.json())
                 .then(data => {
                     Swal.close();
-                    showToast('Data loaded!', 'success', 2000, '#006400');
+                    if (data.error) {
+                        // Handle custom error from backend
+                        showToast(`Error: ${data.error}`, 'error', 5000, '#FF0000', '300px');
+                    } else {
+                        showToast('Data loaded!', 'success', 2000, '#006400');
 
-                    document.getElementById('building-count').innerText = data.building_count !== undefined
-                            ? data.building_count
-                            : "Error fetching data";
+                        document.getElementById('building-count').innerText = data.building_count !== undefined
+                                ? data.building_count
+                                : "Error fetching data";
 
-                    addBuildings(data);
-                    addClusters(data);
-
-                    if (data.grids) {
-                        L.geoJSON(data.grids, {
-                            style: function (feature) {
-                                return {
-                                    color: "blue",
-                                    weight: 1,
-                                    fillOpacity: 0
-                                };
-                            }
-                        }).addTo(densityLayer);
+                        addBuildings(data);
+                        addClusters(data);
+                        addGrids(data);
                     }
                 })
                 .catch(error => {
@@ -374,26 +378,17 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({polygon, gridLength})
         })
-                .then(response => {
-                    if (!response.ok) throw new Error('Failed to fetch grids');
-                    return response.json();
-                })
+                .then(response => response.json())
                 .then(data => {
-                    // Close fetching toast and show success toast
                     Swal.close();
-                    showToast('Grids loaded!', 'success', 2000, '#006400');
+                    // Close fetching toast and show success toast
+                    if (data.error) {
+                        showToast(`Error: ${data.error}`, 'error', 5000, '#FF0000', '300px');
+                    } else {
+                        showToast('Grids loaded!', 'success', 2000, '#006400');
 
-                    densityLayer.clearLayers();
-                    if (data.grids) {
-                        L.geoJSON(data.grids, {
-                            style: function (feature) {
-                                return {
-                                    color: "blue",
-                                    weight: 1,
-                                    fillOpacity: 0
-                                };
-                            }
-                        }).addTo(densityLayer);
+                        densityLayer.clearLayers();
+                        addGrids(data);
                     }
                 })
                 .catch(error => {

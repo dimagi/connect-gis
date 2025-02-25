@@ -291,14 +291,18 @@ def cluster_buildings_kMeans(buildingsGDF, coords, num_clusters=3):
     cluster_labels = kmeans.fit_predict(coords)
     return  getClusters(buildingsGDF, coords, cluster_labels)
 
-def getGrids(region, filtered_buildings, grid_size=50):
+def getGridsFromGEE(region, filtered_buildings, grid_size=50):
     grid = ee.FeatureCollection(region.coveringGrid('EPSG:4326', grid_size))  # Ensure it's a FeatureCollection
 
     density_zones = grid.map(
         lambda cell: ee.Feature(cell).set("count", filtered_buildings.filterBounds(cell.geometry()).size()))
 
     # Convert to GeoJSON
-    density_zones_geojson = density_zones.getInfo()
+    try:
+        density_zones_geojson = density_zones.getInfo()
+    except ee.EEException as e:
+        raise Exception(
+            "Too many elements: The area contains more than 5000 buildings or grid cells. Please reduce the polygon size.")
 
     density_features = []
     for feature in density_zones_geojson["features"]:
@@ -310,7 +314,7 @@ def getGrids(region, filtered_buildings, grid_size=50):
             })
     return density_features
 
-def getGrids1(region, filtered_buildings, grid_size=50):
+def getGrids(region, filtered_buildings, grid_size=50):
     """
     Generate 50m x 50m grids with building counts within a region, optimized for speed.
 
@@ -357,16 +361,7 @@ def getGrids1(region, filtered_buildings, grid_size=50):
     except ee.EEException as e:
         raise ee.EEException(f"Failed to convert grids to GeoJSON: {str(e)}")
 
-
-@app.route('/get_building_density', methods=['POST'])
-def get_building_density():
-    data = request.get_json()
-    polygon_coords = data.get("polygon", [])
-    thresholdVal = float(data.get("thresholdVal"))
-    clusteringType = data.get("clusteringType")
-    noOfClusters = int(data.get("noOfClusters"))
-    noOfBuildings = int(data.get("noOfBuildings"))
-    gridSize = int(data.get("gridLength"))
+def getBuildingsData(polygon_coords):
     if not polygon_coords:
         return jsonify({"error": "Invalid polygon coordinates"}), 400
 
@@ -374,34 +369,53 @@ def get_building_density():
     region = ee.Geometry.Polygon(polygon_coords)
     # Filter buildings inside the polygon
     filtered_buildings = buildings.filterBounds(region)
+    try:
+        buildings_geojson = filtered_buildings.getInfo()
+    except ee.EEException as e:
+        raise Exception(
+            "Too many elements: The area contains more than 5000 buildings or grid cells. Please reduce the polygon size.")
+    return buildings_geojson
 
-    buildings_geojson = filtered_buildings.getInfo()
-    coordinates = [feature['properties']['longitude_latitude']['coordinates'] for feature in buildings_geojson['features']]
+@app.route('/get_building_density', methods=['POST'])
+def get_building_density():
+    try:
+        data = request.get_json()
+        polygon_coords = data.get("polygon", [])
+        thresholdVal = float(data.get("thresholdVal"))
+        clusteringType = data.get("clusteringType")
+        noOfClusters = int(data.get("noOfClusters"))
+        noOfBuildings = int(data.get("noOfBuildings"))
+        gridSize = int(data.get("gridLength"))
 
-    if not coordinates:
-        return jsonify({"message": "No buildings found within the polygon"}), 404
-    coordinates = np.array(coordinates, copy=True)
-    buildingsCount = len(coordinates)
-    kVal = int(buildingsCount/noOfBuildings)
-    # Perform clustering (or any other processing) as needed
-    clusters = None
-    if(clusteringType == 'kMeans'):
-        # clusters = cluster_buildings_kMeans(buildings_geojson, coordinates, noOfClusters)
-        clusters = optimized_balanced_kmeans_constrained_with_no_of_clusters(buildings_geojson, coordinates, noOfClusters, float(thresholdVal/100))
-    elif(clusteringType == 'greedyDivision'):
-        clusters = cluster_buildings_kMeans(buildings_geojson, coordinates, int(kVal))
-    elif(clusteringType == 'balancedKMeans'):
-        clusters = optimized_balanced_kmeans_constrained_with_buildings_count(buildings_geojson, coordinates, noOfBuildings, float(thresholdVal/100))
-    elif (clusteringType == 'hierarchicalClustering'):
-        clusters = cluster_buildings_with_size(buildings_geojson, coordinates, 100, thresholdVal)
-    elif (clusteringType == 'dbScan'):
-        clusters = cluster_buildings_dbscan(buildings_geojson, coordinates, int(noOfBuildings))
+        buildings_geojson = getBuildingsData(polygon_coords)
+        coordinates = [feature['properties']['longitude_latitude']['coordinates'] for feature in buildings_geojson['features']]
 
-    return jsonify({
-        "building_count": buildingsCount,
-        "buildings": buildings_geojson,
-        "clusters": clusters
-    })
+        if not coordinates:
+            return jsonify({"message": "No buildings found within the polygon"}), 404
+        coordinates = np.array(coordinates, copy=True)
+        buildingsCount = len(coordinates)
+        kVal = int(buildingsCount/noOfBuildings)
+        # Perform clustering (or any other processing) as needed
+        clusters = None
+        if(clusteringType == 'kMeans'):
+            # clusters = cluster_buildings_kMeans(buildings_geojson, coordinates, noOfClusters)
+            clusters = optimized_balanced_kmeans_constrained_with_no_of_clusters(buildings_geojson, coordinates, noOfClusters, float(thresholdVal/100))
+        elif(clusteringType == 'greedyDivision'):
+            clusters = cluster_buildings_kMeans(buildings_geojson, coordinates, int(kVal))
+        elif(clusteringType == 'balancedKMeans'):
+            clusters = optimized_balanced_kmeans_constrained_with_buildings_count(buildings_geojson, coordinates, noOfBuildings, float(thresholdVal/100))
+        elif (clusteringType == 'hierarchicalClustering'):
+            clusters = cluster_buildings_with_size(buildings_geojson, coordinates, 100, thresholdVal)
+        elif (clusteringType == 'dbScan'):
+            clusters = cluster_buildings_dbscan(buildings_geojson, coordinates, int(noOfBuildings))
+
+        return jsonify({
+            "building_count": buildingsCount,
+            "buildings": buildings_geojson,
+            "clusters": clusters
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 @app.route('/get_grids', methods=['POST'])
 def getGridsData():
@@ -415,12 +429,14 @@ def getGridsData():
     region = ee.Geometry.Polygon(polygon_coords)
     # Filter buildings inside the polygon
     filtered_buildings = buildings.filterBounds(region)
-    grids = getGrids(region, filtered_buildings, gridSize)
-    return jsonify({
-        "grids": grids
-    })
+
+    try:
+        grids = getGridsFromGEE(region, filtered_buildings, gridSize)
+        return jsonify({"grids": grids})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 
 # Run the Flask app
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host='0.0.0.0', port=5000, debug=True)
