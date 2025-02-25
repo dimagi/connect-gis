@@ -46,6 +46,7 @@
 
 <div id="map"></div>
 <p id="info">Buildings in selected area: <span id="building-count">0</span></p>
+<p id="clusterCount">Clusters Created: <span id="cluster-count-val">0</span></p>
 
 </div>
 
@@ -239,13 +240,14 @@
     function addClusters(data) {
         if (data.clusters) {
             const clusterGroups = {};
-
+            let noOfClusters = 0;
             // Group points by cluster ID and calculate number of buildings per cluster
             data.clusters.forEach(feature => {
                 const {cluster, coordinates, numOfBuildings} = feature;
 
                 if (clusteringType != 'dbScan' || cluster != -1) {
                     if (!clusterGroups[cluster]) {
+                        noOfClusters += 1
                         clusterGroups[cluster] = {points: [], numOfBuildings: 0};
                     }
 
@@ -254,7 +256,7 @@
 
                 }
             });
-
+            document.getElementById('cluster-count-val').innerText = noOfClusters;
             // Draw cluster boundaries and popups
             Object.entries(clusterGroups).forEach(([clusterId, {points, numOfBuildings}]) => {
                 if (points.length > 2) {
@@ -401,6 +403,11 @@
     }
 
     function getColorForNumber(num) {
+        const hue = (num * 137) % 360;
+        return `hsl(${hue}, 90%, 50%)`;
+    }
+
+    function getColorForNumber1(num) {
         // Special cases for specific numbers (optional, kept from your original)
         // if (num === 0) return 'red';     // #ff0000
         // if (num === 1) return 'green';   // #00ff00
