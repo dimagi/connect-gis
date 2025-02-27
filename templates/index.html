@@ -88,7 +88,8 @@
 
 <button onclick="fetchData(oaLangLats, false)" disabled id="run-clustering">Run Clustering</button>
 <button onclick="getGrids(oaLangLats)" disabled id="get-grids" >Get Grids</button>
-<button onclick="clearMap(); clearOA();">Clear Map</button>
+<button onclick="clearMap();" id = "clear-oa">Clear Clusters</button>
+<button onclick="clearMap(); clearOA();" id = "clear-map">Clear Map</button>
 
 <script>
     const hostUrl = "https://map-clustering.onrender.com"
@@ -176,7 +177,7 @@
         });
     });
 
-        function clearMap() {
+    function clearMap() {
         buildingsLayer.clearLayers();
         clusterLayer.clearLayers();
         densityLayer.clearLayers();
@@ -283,7 +284,7 @@
 
                         // Add boundary layer
                         const boundaryLayer = L.geoJSON(boundary, {color: color, fillOpacity: 0});
-                        boundaryLayer.bindPopup(`Cluster ${clusterId} \n Number of Buildings: ${numOfBuildings}`);
+                        boundaryLayer.bindPopup(`Cluster ${parseInt(clusterId, 10) + 1} \n Number of Buildings: ${numOfBuildings}`);
                         clusterLayer.addLayer(boundaryLayer);
                     }
                 }
@@ -293,6 +294,8 @@
 
     function fetchData(polygon) {
         clearMap();
+        enableOrDisableFields("clear-map", true);
+        enableOrDisableFields("clear-oa", true);
         let thresholdVal = document.getElementById("thresholdVal").value || 0.5;
         let clusteringType = document.getElementById("clusteringType").value;
         let noOfClusters = document.getElementById("noOfClusters").value;
@@ -306,7 +309,11 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({polygon, thresholdVal, clusteringType, noOfClusters, noOfBuildings, gridLength})
         })
-        .then(response => response.json())
+        .then(response => {
+            enableOrDisableFields("clear-map", false);
+            enableOrDisableFields("clear-oa", false);
+            return response.json()
+        })
         .then(data => {
             Swal.close();
             if (data.error) {
@@ -329,6 +336,8 @@
 
             console.error('Error:', error);
             document.getElementById('building-count').innerText = "Error fetching data";
+            enableOrDisableFields("clear-map", false);
+            enableOrDisableFields("clear-oa", false);
         });
     }
 
@@ -349,7 +358,8 @@
     }
 
     function getGrids(polygon) {
-
+        enableOrDisableFields("clear-map", true);
+        enableOrDisableFields("clear-oa", true);
         let gridLength = document.getElementById("gridLength").value;
 
         // Show fetching toast
@@ -360,26 +370,32 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({polygon, gridLength})
         })
-                .then(response => response.json())
-                .then(data => {
-                    Swal.close();
-                    // Close fetching toast and show success toast
-                    if (data.error) {
-                        showToast(`Error: ${data.error}`, 'error', 5000, '#FF0000', '300px');
-                    } else {
-                        showToast('Grids loaded!', 'success', 2000, '#006400');
+        .then(response => {
+            enableOrDisableFields("clear-map", false);
+            enableOrDisableFields("clear-oa", false);
+            return response.json()
+        })
+        .then(data => {
+            Swal.close();
+            // Close fetching toast and show success toast
+            if (data.error) {
+                showToast(`Error: ${data.error}`, 'error', 5000, '#FF0000', '300px');
+            } else {
+                showToast('Grids loaded!', 'success', 2000, '#006400');
 
-                        densityLayer.clearLayers();
-                        addGrids(data);
-                    }
-                })
-                .catch(error => {
-                    // Close fetching toast and show error toast
-                    Swal.close();
-                    showToast(`Error: ${error.message}`, 'error', 5000, '#FF0000', '300px');
+                densityLayer.clearLayers();
+                addGrids(data);
+            }
+        })
+        .catch(error => {
+            // Close fetching toast and show error toast
+            Swal.close();
+            showToast(`Error: ${error.message}`, 'error', 5000, '#FF0000', '300px');
 
-                    console.error('Error:', error);
-                });
+            console.error('Error:', error);
+            enableOrDisableFields("clear-map", false);
+            enableOrDisableFields("clear-oa", false);
+        });
     }
 
     function getColorForNumber(num) {
