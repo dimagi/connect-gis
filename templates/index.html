@@ -37,6 +37,28 @@
             border-radius: 5px;
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
         }
+
+        #csvUpload::-webkit-file-upload-button { visibility: hidden; }
+        #csvUpload { 
+            width: 0.1px; /* Minimize input width */
+            height: 0.1px;
+            opacity: 0;
+            overflow: hidden;
+            position: absolute;
+            z-index: -1;
+        }
+        /* Style the label to look like a button */
+        #csvUploadLabel {
+            display: inline-block;
+            padding: 6px 12px;
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        #csvUploadLabel:hover { background-color: #45a049; }
+        #uploaded-file-name { margin-left: 10px; }
+
     </style>
 </head>
 <body>
@@ -45,6 +67,11 @@
 <p>Draw a polygon on the map to see the number of buildings and their cluster representation.</p>
 
 <div id="map"></div>
+<br>
+<input type="file" id="csvUpload" accept=".csv" onchange="uploadCSVPolygon()">
+    <label for="csvUpload" id="csvUploadLabel">Upload CSV</label>
+    <span id="uploaded-file-name">No File chosen</span>
+
 <p id="info">Buildings in selected area: <span id="building-count">0</span></p>
 <p id="clusterCount">Service Areas Created: <span id="cluster-count-val">0</span></p>
 
@@ -206,9 +233,11 @@
         enableOrDisableFields("get-grids", true);
         clearClusters()
         enableOrDisableFields("clear-oa", true);
+        document.getElementById("uploaded-file-name").innerText = 'No File Chosen';
     }
 
     function addOrUpdatePolygon(layers) {
+        clearOA()
         isDrawing = false;
 
         // Get the polygon coordinates and close the loop
@@ -339,7 +368,7 @@
                 // Handle custom error from backend
                 showToast(`Error: ${data.error}`, 'error', 5000, '#FF0000', '300px');
             } else {
-                showToast('Data loaded!', 'success', 2000, '#006400');
+                showToast('Data loaded!', 'success', 2000, '#4CAF50');
                 document.getElementById('building-count').innerText = data.building_count !== undefined
                         ? data.building_count
                         : "Error fetching data";
@@ -386,7 +415,7 @@
         gridsDataExists = false
         enableOrDisableFields("download-csv" ,!(gridsDataExists && clustersDataExists))
         // Show fetching toast
-        showToast('Fetching grids...', 'info', undefined, '#ff9300');
+        showToast('Fetching Delivery Units...', 'info', undefined, '#ff9300');
 
         fetch(`${hostUrl}/get_grids`, {
             method: 'POST',
@@ -404,7 +433,7 @@
             if (data.error) {
                 showToast(`Error: ${data.error}`, 'error', 5000, '#FF0000', '300px');
             } else {
-                showToast('Grids loaded!', 'success', 2000, '#006400');
+                showToast('Delivery Units loaded!', 'success', 2000, '#4CAF50');
 
                 densityLayer.clearLayers();
                 addGrids(data);
@@ -640,6 +669,69 @@
         document.body.removeChild(a);
         window.URL.revokeObjectURL(url);
 
+    }
+
+    function uploadCSVPolygon() {
+        clearOA(); // Clear existing OA layers
+
+        const fileInput = document.getElementById("csvUpload");
+        const file = fileInput.files[0];
+        if (!file) return showToast("Please select a CSV file.", "warning", 3000, "#FFA500");
+
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            try {
+                const rows = event.target.result.split('\n').filter(row => row.trim());
+                if (rows.length < 2) throw new Error("CSV has no data rows.");
+
+                const parseCSVRow = row => {
+                    const fields = [];
+                    let inQuotes = false, field = '';
+                    for (let char of row) {
+                        if (char === '"') inQuotes = !inQuotes;
+                        else if (char === ',' && !inQuotes) {
+                            fields.push(field.trim());
+                            field = '';
+                        } else {
+                            field += char;
+                        }
+                    }
+                    fields.push(field.trim());
+                    return fields;
+                };
+
+                const [header, firstDataRow] = [parseCSVRow(rows[0]), parseCSVRow(rows[1])];
+                if (firstDataRow.length < 2) throw new Error("CSV row lacks sufficient columns.");
+
+                const wktString = firstDataRow[1];
+                if (!wktString.match(/^POLYGON \(\(.*\)\)$/)) throw new Error("Invalid WKT format in CSV.");
+
+                const coordsStr = wktString.match(/POLYGON \(\((.*?)\)\)/)?.[1];
+                if (!coordsStr) throw new Error("Could not parse POLYGON coordinates.");
+
+                const latLngs = coordsStr.split(', ').map(coord => {
+                    const [lon, lat] = coord.split(' ').map(Number);
+                    if (isNaN(lon) || isNaN(lat)) throw new Error("Invalid coordinate values.");
+                    return [lat, lon]; // lonlat to latlon
+                });
+
+                const mockLayer = {
+                    getLatLngs: () => [latLngs.map(([lat, lng]) => ({ lat, lng }))],
+                    getBounds: () => L.latLngBounds(latLngs)
+                };
+
+                addOrUpdatePolygon(mockLayer);
+                showToast("OA loaded from CSV!", "success", 2000, "#4CAF50");
+                document.getElementById("uploaded-file-name").innerText = file.name;
+            } catch (error) {
+                showToast(`Error: ${error.message}`, "error", 3000, "#FF0000");
+                document.getElementById("uploaded-file-name").innerText = 'No File Chosen';
+            } finally {
+                fileInput.value = ''; // Reset input in all cases
+            }
+        };
+        reader.onerror = () => showToast("Error reading CSV file.", "error", 3000, "#FF0000");
+        reader.readAsText(file);
     }
 </script>
 
