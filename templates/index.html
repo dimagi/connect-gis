@@ -86,12 +86,13 @@
     <br>
 </div>
 
-<button onclick="fetchData(oaLatLangs, false)">Run Clustering</button>
-<button onclick="getGrids(oaLatLangs)">Get Grids</button>
-<button onclick="clearMap()">Clear Map</button>
+<button onclick="fetchData(oaLangLats, false)" disabled id="run-clustering">Run Clustering</button>
+<button onclick="getGrids(oaLangLats)" disabled id="get-grids" >Get Grids</button>
+<button onclick="clearMap(); clearOA();">Clear Map</button>
 
 <script>
     const hostUrl = "https://map-clustering.onrender.com"
+    let oaLangLats = []
 
     function toggleInputFields() {
         var method = document.getElementById("clusteringType").value;
@@ -102,7 +103,6 @@
 
 
     toggleInputFields();
-    let oaLatLangs = []
     // var map = L.map('map').setView([9.0880, 7.4958],16); // Centered on Abuja, Nigeria
     var map = L.map('map').setView([9.082, 8.6753], 6); // Centered on Nigeria
     // var map = L.map('map').setView([13.3041, 7.7968],14); // Centered on Abuja, Nigeria
@@ -161,45 +161,58 @@
     var clusterLayer = L.featureGroup().addTo(map);
     var densityLayer = L.geoJSON(null).addTo(map);
 
-    function clearMap() {
-        drawnItems.clearLayers();
+    let isDrawing = false;
+    map.on(L.Draw.Event.DRAWSTART, function (e) {
+        isDrawing = true;
+    });
+    
+    map.on(L.Draw.Event.CREATED, function (event) {
+        addOrUpdatePolygon(event.layer)
+    });
+
+    map.on(L.Draw.Event.EDITED, function (event) {
+        event.layers.eachLayer(function (layer) {
+            addOrUpdatePolygon(layer);
+        });
+    });
+
+        function clearMap() {
         buildingsLayer.clearLayers();
         clusterLayer.clearLayers();
         densityLayer.clearLayers();
     }
 
-    function addOABoundary(layer, latlngs) {
-        oaLatLangs = latlngs;
+    function enableOrDisableFields(field, disable) {
+        document.getElementById(field).disabled = disable;
     }
 
-    let isDrawing = false;
-    map.on(L.Draw.Event.DRAWSTART, function (e) {
-        isDrawing = true;
-    });
+    function clearOA() {
+        oaLangLats = []
+        drawnItems.clearLayers();
+        enableOrDisableFields("run-clustering", true);
+        enableOrDisableFields("get-grids", true);
+    }
 
-    // When a polygon is drawn
-    map.on(L.Draw.Event.CREATED, function (event) {
-        isDrawing = false
-        clearMap()
-        // Get polygon coordinates
-        var latlngs = event.layer.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);
-        latlngs.push(latlngs[0]); // Close the polygon
-        addOABoundary(event.layer, latlngs)
-        fetchData(latlngs, true)
-    });
+    function addOrUpdatePolygon(layers) {
+        isDrawing = false;
 
-    map.on('draw:edited', function (e) {
-        clearMap()
-        var layers = e.layers;
-        layers.eachLayer(function (layer) {
-            // Check if the layer is a polygon
-            if (layer instanceof L.Polygon) {
-                var latlngs = layer.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);
-                addOABoundary(layer, latlngs)
-                fetchData(latlngs, true)
-            }
-        });
-    });
+        // Get the polygon coordinates and close the loop
+        var latlngs = layers.getLatLngs()[0].map(coord => [coord.lat, coord.lng]);
+        latlngs.push(latlngs[0]); // Ensure polygon is closed
+
+        // Create and add the polygon layer
+        var polygonLayer = L.polygon(latlngs, {
+            color: 'blue',
+            weight: 1,
+            fillOpacity: 0
+        }).addTo(drawnItems);
+
+        // Fit map to polygon bounds
+        map.fitBounds(polygonLayer.getBounds());
+        oaLangLats = layers.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);
+        enableOrDisableFields("run-clustering", false);
+        enableOrDisableFields("get-grids", false);
+    }
 
     function addBuildings(data) {
         // Overlay building polygons
@@ -278,30 +291,8 @@
         }
     }
 
-    function fetchData(polygon, clearMapData) {
-        if (!clearMapData) {
-            clearMap();
-        }
-        if (!polygon || polygon.length === 0) {
-            clearMap();
-            polygon = [
-                [7.480294704437257, 9.084527915967186],
-                [7.480294704437257, 9.092282829384425],
-                [7.504327297210694, 9.092282829384425],
-                [7.504327297210694, 9.084527915967186],
-                [7.480294704437257, 9.084527915967186]
-            ];
-        }
-
-        var polygonLatLng = polygon.map(coord => [coord[1], coord[0]]);
-        var polygonLayer = L.polygon(polygonLatLng, {
-            color: 'blue',
-            weight: 1,
-            fillOpacity: 0
-        }).addTo(drawnItems);
-
-        map.fitBounds(polygonLayer.getBounds());
-
+    function fetchData(polygon) {
+        clearMap();
         let thresholdVal = document.getElementById("thresholdVal").value || 0.5;
         let clusteringType = document.getElementById("clusteringType").value;
         let noOfClusters = document.getElementById("noOfClusters").value;
@@ -315,34 +306,32 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({polygon, thresholdVal, clusteringType, noOfClusters, noOfBuildings, gridLength})
         })
-                .then(response => response.json())
-                .then(data => {
-                    Swal.close();
-                    if (data.error) {
-                        // Handle custom error from backend
-                        showToast(`Error: ${data.error}`, 'error', 5000, '#FF0000', '300px');
-                    } else {
-                        showToast('Data loaded!', 'success', 2000, '#006400');
+        .then(response => response.json())
+        .then(data => {
+            Swal.close();
+            if (data.error) {
+                // Handle custom error from backend
+                showToast(`Error: ${data.error}`, 'error', 5000, '#FF0000', '300px');
+            } else {
+                showToast('Data loaded!', 'success', 2000, '#006400');
+                document.getElementById('building-count').innerText = data.building_count !== undefined
+                        ? data.building_count
+                        : "Error fetching data";
 
-                        document.getElementById('building-count').innerText = data.building_count !== undefined
-                                ? data.building_count
-                                : "Error fetching data";
+                addBuildings(data);
+                addClusters(data);
+                addGrids(data);
+            }
+        })
+        .catch(error => {
+            Swal.close();
+            showToast(`Error: ${error.message}`, 'error', 5000, '#FF0000', '300px');
 
-                        addBuildings(data);
-                        addClusters(data);
-                        addGrids(data);
-                    }
-                })
-                .catch(error => {
-                    Swal.close();
-                    showToast(`Error: ${error.message}`, 'error', 5000, '#FF0000', '300px');
-
-                    console.error('Error:', error);
-                    document.getElementById('building-count').innerText = "Error fetching data";
-                });
+            console.error('Error:', error);
+            document.getElementById('building-count').innerText = "Error fetching data";
+        });
     }
 
-    // Reusable toast function
     function showToast(title, icon, timer, background, width = '250px') {
         Swal.fire({
             toast: true,
@@ -360,15 +349,6 @@
     }
 
     function getGrids(polygon) {
-        if (!polygon || polygon.length === 0) {
-            polygon = [
-                [7.480294704437257, 9.084527915967186],
-                [7.480294704437257, 9.092282829384425],
-                [7.504327297210694, 9.092282829384425],
-                [7.504327297210694, 9.084527915967186],
-                [7.480294704437257, 9.084527915967186]
-            ];
-        }
 
         let gridLength = document.getElementById("gridLength").value;
 
@@ -405,42 +385,6 @@
     function getColorForNumber(num) {
         const hue = (num * 137) % 360;
         return `hsl(${hue}, 90%, 50%)`;
-    }
-
-    function getColorForNumber1(num) {
-        // Special cases for specific numbers (optional, kept from your original)
-        // if (num === 0) return 'red';     // #ff0000
-        // if (num === 1) return 'green';   // #00ff00
-        // if (num === 2) return 'blue';    // #0000ff
-        // if (num === -1) return 'purple'; // #800080
-
-        // Use HSL to generate distinct colors for each cluster
-        const hue = (num * 137) % 360; // Spread hues across 0–360°, 137 is a prime for good distribution
-        const saturation = 70;         // 70% saturation for vibrant colors
-        const lightness = 50;          // 50% lightness for balanced brightness
-
-        // Convert HSL to RGB
-        const hslToRgb = (h, s, l) => {
-            s /= 100;
-            l /= 100;
-            const c = (1 - Math.abs(2 * l - 1)) * s; // Chroma
-            const x = c * (1 - Math.abs((h / 60) % 2 - 1));
-            const m = l - c / 2;
-            let r, g, b;
-
-            if (h >= 0 && h < 60) [r, g, b] = [c, x, 0];
-            else if (h < 120) [r, g, b] = [x, c, 0];
-            else if (h < 180) [r, g, b] = [0, c, x];
-            else if (h < 240) [r, g, b] = [0, x, c];
-            else if (h < 300) [r, g, b] = [x, 0, c];
-            else [r, g, b] = [c, 0, x];
-
-            // Convert to 0–255 range and to hex
-            const toHex = (value) => ('0' + Math.round((value + m) * 255).toString(16)).slice(-2);
-            return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-        };
-
-        return hslToRgb(hue, saturation, lightness);
     }
 
     function setupIndex(data, index, type) {
@@ -542,33 +486,33 @@
             },
             body: JSON.stringify({lat: lat, lon: lng, algo})
         })
-                .then(response => response.json())
-                .then(data => {
-                    clearMap()
-                    document.getElementById('building-count').innerText = data.building_count;
-                    L.geoJSON(data.buildings, {
-                        style: function (feature) {
-                            return {
-                                color: 'red',
-                                weight: 1,
-                                fillOpacity: 0.4
-                            };
-                        }
-                    }).addTo(buildingsLayer);
+        .then(response => response.json())
+        .then(data => {
+            clearMap()
+            document.getElementById('building-count').innerText = data.building_count;
+            L.geoJSON(data.buildings, {
+                style: function (feature) {
+                    return {
+                        color: 'red',
+                        weight: 1,
+                        fillOpacity: 0.4
+                    };
+                }
+            }).addTo(buildingsLayer);
 
-                    let boundary = turf.convex(data.buildings);
+            let boundary = turf.convex(data.buildings);
 
-                    if (boundary) {
-                        L.geoJSON(boundary, {
-                            style: {
-                                color: 'blue',  // Boundary color
-                                weight: 1,
-                                fillOpacity: 0.1
-                            }
-                        }).addTo(clusterLayer);
+            if (boundary) {
+                L.geoJSON(boundary, {
+                    style: {
+                        color: 'blue',  // Boundary color
+                        weight: 1,
+                        fillOpacity: 0.1
                     }
-                })
-                .catch(error => console.error('Error sending coordinates:', error));
+                }).addTo(clusterLayer);
+            }
+        })
+        .catch(error => console.error('Error sending coordinates:', error));
     }
 
 </script>
