@@ -46,13 +46,13 @@
 
 <div id="map"></div>
 <p id="info">Buildings in selected area: <span id="building-count">0</span></p>
-<p id="clusterCount">Clusters Created: <span id="cluster-count-val">0</span></p>
+<p id="clusterCount">Service Areas Created: <span id="cluster-count-val">0</span></p>
 
 </div>
 
 <div>
     <div>
-        <label for="clusteringType">Select Clustering Method:</label>
+        <label for="clusteringType">Select Service Area Grouping Method:</label>
         <select id="clusteringType" onchange="toggleInputFields()">
             <option value="kMeans">K-Means Clustering</option>
             <option value="balancedKMeans">Balanced K Means</option>
@@ -80,15 +80,15 @@
     </div>
     <div id="gridLengthIP">
         <br>
-        <label for="gridLength">Grid Length in metres:</label>
+        <label for="gridLength">Delivery Unit Length in metres:</label>
         <input type="number" id="gridLength" step="0.01" value="50">
     </div>
     <br>
 </div>
 
-<button onclick="fetchData(oaLangLats, false)" disabled id="run-clustering">Run Clustering</button>
-<button onclick="getGrids(oaLangLats)" disabled id="get-grids" >Get Grids</button>
-<button onclick="clearClusters();" id = "clear-clusters" disabled>Clear Clusters</button>
+<button onclick="fetchData(oaLangLats, false)" disabled id="run-clustering">Get Service Areas</button>
+<button onclick="getGrids(oaLangLats)" disabled id="get-grids" >Get Delivery Units</button>
+<button onclick="clearClusters();" id = "clear-clusters" disabled>Clear Service Areas</button>
 <button onclick="clearOA();" id = "clear-oa" disabled>Clear Map</button>
 <button onclick="downloadGmapData();" id = "download-csv" disabled>Download CSV</button>
 
@@ -593,7 +593,6 @@
             }
         });
 
-        let gridCsvContent = "WKT,name,description\n";
         if (lastFetchedData.grids) {
             lastFetchedData.grids.forEach((grid, index) => {
                 const geometry = grid.geometry;
@@ -602,7 +601,7 @@
                     const wkt = `POLYGON ((${coords}, ${geometry.coordinates[0][0][0]} ${geometry.coordinates[0][0][1]}))`;
                     const name = `Grid ${index + 1}`;
                     const description = `${grid.properties.count || 0} buildings`;
-                    gridCsvContent += `"${wkt}",${name},${description}\n`;
+                    clusterCsvContent += `"${wkt}",${name},${description}\n`;
                 } else {
                     console.error("Invalid grid geometry:", grid);
                 }
@@ -625,9 +624,8 @@
             }
         });
         
-        downloadCsv(clusterCsvContent, 'clusters.csv')
+        downloadCsv(clusterCsvContent, 'service_area_&_delivery_units.csv')
         downloadCsv(buildingsCsvContent, 'buildings.csv')
-        downloadCsv(gridCsvContent, 'grids.csv')
         showToast("CSV downloaded! Import into Google My Maps at mymaps.google.com.", "success", 3000, "#00FF00");
     }
 
