@@ -89,12 +89,15 @@
 <button onclick="fetchData(oaLangLats, false)" disabled id="run-clustering">Run Clustering</button>
 <button onclick="getGrids(oaLangLats)" disabled id="get-grids" >Get Grids</button>
 <button onclick="clearMap();" id = "clear-oa">Clear Clusters</button>
-<button onclick="clearMap(); clearOA();" id = "clear-map">Clear Map</button>
+<button onclick="clearOA();" id = "clear-map">Clear Map</button>
+<button onclick="downloadGmapData();" id = "download-csv" disabled>Download CSV</button>
 
 <script>
     const hostUrl = "https://map-clustering.onrender.com"
     let oaLangLats = []
-
+    let clustersDataExists = false;
+    let gridsDataExists = false;
+    let lastFetchedData = {}
     function toggleInputFields() {
         var method = document.getElementById("clusteringType").value;
         document.getElementById("noOfClustersIP").style.display = (method === "kMeans") ? "block" : "none";
@@ -181,6 +184,13 @@
         buildingsLayer.clearLayers();
         clusterLayer.clearLayers();
         densityLayer.clearLayers();
+        resetFields()
+        enableOrDisableFields("download-csv" ,!(gridsDataExists && clustersDataExists))
+    }
+    function resetFields() {
+        clustersDataExists = false;
+        gridsDataExists = false;
+        lastFetchedData = {}
     }
 
     function enableOrDisableFields(field, disable) {
@@ -192,6 +202,7 @@
         drawnItems.clearLayers();
         enableOrDisableFields("run-clustering", true);
         enableOrDisableFields("get-grids", true);
+        clearMap()
     }
 
     function addOrUpdatePolygon(layers) {
@@ -248,6 +259,7 @@
                     };
                 }
             }).addTo(densityLayer);
+            lastFetchedData.grids = data.grids
         }
     }
 
@@ -296,6 +308,9 @@
         clearMap();
         enableOrDisableFields("clear-map", true);
         enableOrDisableFields("clear-oa", true);
+        clustersDataExists = false
+        lastFetchedData = {}
+        enableOrDisableFields("download-csv" ,!(gridsDataExists && clustersDataExists))
         let thresholdVal = document.getElementById("thresholdVal").value || 0.5;
         let clusteringType = document.getElementById("clusteringType").value;
         let noOfClusters = document.getElementById("noOfClusters").value;
@@ -328,6 +343,9 @@
                 addBuildings(data);
                 addClusters(data);
                 addGrids(data);
+                lastFetchedData = data
+                clustersDataExists = true
+                enableOrDisableFields("download-csv" ,!(gridsDataExists && clustersDataExists))
             }
         })
         .catch(error => {
@@ -361,7 +379,8 @@
         enableOrDisableFields("clear-map", true);
         enableOrDisableFields("clear-oa", true);
         let gridLength = document.getElementById("gridLength").value;
-
+        gridsDataExists = false
+        enableOrDisableFields("download-csv" ,!(gridsDataExists && clustersDataExists))
         // Show fetching toast
         showToast('Fetching grids...', 'info', undefined, '#ff9300');
 
@@ -385,6 +404,8 @@
 
                 densityLayer.clearLayers();
                 addGrids(data);
+                gridsDataExists = true
+                enableOrDisableFields("download-csv" ,!(gridsDataExists && clustersDataExists))
             }
         })
         .catch(error => {
@@ -531,6 +552,93 @@
         .catch(error => console.error('Error sending coordinates:', error));
     }
 
+
+    function downloadGmapData() {
+        const clusterGroups = {};
+        let noOfClusters = 0;
+        lastFetchedData.clusters.forEach(feature => {
+            const { cluster, coordinates, numOfBuildings } = feature;
+            // Assuming clusteringType is accessible globally or passed; adjust if needed
+            if (clusteringType !== 'dbScan' || cluster !== -1) {
+                if (!clusterGroups[cluster]) {
+                    noOfClusters += 1;
+                    clusterGroups[cluster] = { points: [], numOfBuildings: 0 };
+                }
+                clusterGroups[cluster].points.push(coordinates);
+                clusterGroups[cluster].numOfBuildings = numOfBuildings;
+            }
+        });
+
+
+        // Generate CSV with WKT polygons
+        let clusterCsvContent = "WKT,name,description\n";
+        Object.entries(clusterGroups).forEach(([clusterId, { points, numOfBuildings }]) => {
+            if (points.length > 2) {
+                const turfPoints = points.map(p => turf.point(p));
+                const featureCollection = turf.featureCollection(turfPoints);
+                const boundary = turf.convex(featureCollection);
+
+                if (boundary) {
+                    // Extract polygon coordinates and convert to WKT
+                    const coords = boundary.geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
+                    const wkt = `POLYGON ((${coords}, ${boundary.geometry.coordinates[0][0][0]} ${boundary.geometry.coordinates[0][0][1]}))`; // Close the polygon
+                    const name = `Cluster ${clusterId}`;
+                    const description = `${numOfBuildings} buildings`;
+                    clusterCsvContent += `"${wkt}",${name},${description}\n`;
+                }
+            }
+        });
+
+        let gridCsvContent = "WKT,name,description\n";
+        if (lastFetchedData.grids) {
+            lastFetchedData.grids.forEach((grid, index) => {
+                const geometry = grid.geometry;
+                if (geometry && geometry.type === "Polygon" && Array.isArray(geometry.coordinates)) {
+                    const coords = geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
+                    const wkt = `POLYGON ((${coords}, ${geometry.coordinates[0][0][0]} ${geometry.coordinates[0][0][1]}))`;
+                    const name = `Grid ${index + 1}`;
+                    const description = `${grid.properties.count || 0} buildings`;
+                    gridCsvContent += `"${wkt}",${name},${description}\n`;
+                } else {
+                    console.error("Invalid grid geometry:", grid);
+                }
+            });
+        }
+
+        let buildingsCsvContent = "WKT,name,description\n";
+        lastFetchedData.buildings.features.forEach((feature, index) => {
+            const geometry = feature.geometry;
+            if (geometry && geometry.type === "Polygon" && Array.isArray(geometry.coordinates)) {
+                // Convert polygon coordinates to WKT format
+                const coords = geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
+                const wkt = `POLYGON ((${coords}, ${geometry.coordinates[0][0][0]} ${geometry.coordinates[0][0][1]}))`;
+                const clusterLabel = feature.properties.cluster_label; // Use cluster label or default
+                const name = `Building ${index + 1}`;
+                const description = `Cluster: ${clusterLabel}`;
+                buildingsCsvContent += `"${wkt}",${name},${description}\n`;
+            } else {
+                console.error("Invalid building geometry:", feature);
+            }
+        });
+        
+        downloadCsv(clusterCsvContent, 'clusters.csv')
+        downloadCsv(buildingsCsvContent, 'buildings.csv')
+        downloadCsv(gridCsvContent, 'grids.csv')
+        showToast("CSV downloaded! Import into Google My Maps at mymaps.google.com.", "success", 3000, "#00FF00");
+    }
+
+    function downloadCsv(csvContent, fileName) {
+        const blob = new Blob([csvContent], { type: "text/csv" });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+
+    }
 </script>
 
 </body>
