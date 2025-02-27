@@ -88,8 +88,8 @@
 
 <button onclick="fetchData(oaLangLats, false)" disabled id="run-clustering">Run Clustering</button>
 <button onclick="getGrids(oaLangLats)" disabled id="get-grids" >Get Grids</button>
-<button onclick="clearMap();" id = "clear-oa">Clear Clusters</button>
-<button onclick="clearOA();" id = "clear-map">Clear Map</button>
+<button onclick="clearClusters();" id = "clear-clusters" disabled>Clear Clusters</button>
+<button onclick="clearOA();" id = "clear-oa" disabled>Clear Map</button>
 <button onclick="downloadGmapData();" id = "download-csv" disabled>Download CSV</button>
 
 <script>
@@ -180,12 +180,14 @@
         });
     });
 
-    function clearMap() {
+    function clearClusters() {
         buildingsLayer.clearLayers();
         clusterLayer.clearLayers();
         densityLayer.clearLayers();
+        document.getElementById('cluster-count-val').innerText = 0;
         resetFields()
         enableOrDisableFields("download-csv" ,!(gridsDataExists && clustersDataExists))
+        enableOrDisableFields("clear-clusters", true);
     }
     function resetFields() {
         clustersDataExists = false;
@@ -202,7 +204,8 @@
         drawnItems.clearLayers();
         enableOrDisableFields("run-clustering", true);
         enableOrDisableFields("get-grids", true);
-        clearMap()
+        clearClusters()
+        enableOrDisableFields("clear-oa", true);
     }
 
     function addOrUpdatePolygon(layers) {
@@ -224,6 +227,7 @@
         oaLangLats = layers.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);
         enableOrDisableFields("run-clustering", false);
         enableOrDisableFields("get-grids", false);
+        enableOrDisableFields("clear-oa", false);
     }
 
     function addBuildings(data) {
@@ -305,8 +309,8 @@
     }
 
     function fetchData(polygon) {
-        clearMap();
-        enableOrDisableFields("clear-map", true);
+        clearClusters();
+        enableOrDisableFields("clear-clusters", true);
         enableOrDisableFields("clear-oa", true);
         clustersDataExists = false
         lastFetchedData = {}
@@ -325,7 +329,7 @@
             body: JSON.stringify({polygon, thresholdVal, clusteringType, noOfClusters, noOfBuildings, gridLength})
         })
         .then(response => {
-            enableOrDisableFields("clear-map", false);
+            enableOrDisableFields("clear-clusters", false);
             enableOrDisableFields("clear-oa", false);
             return response.json()
         })
@@ -354,7 +358,7 @@
 
             console.error('Error:', error);
             document.getElementById('building-count').innerText = "Error fetching data";
-            enableOrDisableFields("clear-map", false);
+            enableOrDisableFields("clear-clusters", false);
             enableOrDisableFields("clear-oa", false);
         });
     }
@@ -376,7 +380,7 @@
     }
 
     function getGrids(polygon) {
-        enableOrDisableFields("clear-map", true);
+        enableOrDisableFields("clear-clusters", true);
         enableOrDisableFields("clear-oa", true);
         let gridLength = document.getElementById("gridLength").value;
         gridsDataExists = false
@@ -390,7 +394,7 @@
             body: JSON.stringify({polygon, gridLength})
         })
         .then(response => {
-            enableOrDisableFields("clear-map", false);
+            enableOrDisableFields("clear-clusters", false);
             enableOrDisableFields("clear-oa", false);
             return response.json()
         })
@@ -414,7 +418,7 @@
             showToast(`Error: ${error.message}`, 'error', 5000, '#FF0000', '300px');
 
             console.error('Error:', error);
-            enableOrDisableFields("clear-map", false);
+            enableOrDisableFields("clear-clusters", false);
             enableOrDisableFields("clear-oa", false);
         });
     }
@@ -525,7 +529,7 @@
         })
         .then(response => response.json())
         .then(data => {
-            clearMap()
+            clearClusters()
             document.getElementById('building-count').innerText = data.building_count;
             L.geoJSON(data.buildings, {
                 style: function (feature) {
