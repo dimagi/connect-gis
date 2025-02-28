@@ -131,7 +131,8 @@
 <button onclick="getGrids(oaLangLats)" disabled id="get-grids" hidden>Get Delivery Units</button>
 <button onclick="clearClusters();" id = "clear-clusters" disabled>Clear Service Areas</button>
 <button onclick="clearOA();" id = "clear-oa" disabled>Clear Map</button>
-<button onclick="downloadGmapData(lastFetchedData);" id = "download-csv" disabled>Download CSV</button>
+<button onclick="downloadGmapData(lastFetchedData);" id = "download-csv" disabled>Download CSV For My Maps</button>
+<button onclick="downloadCsvForCommCare(lastFetchedData, gridAssignments);" id = "download-csv-commcare" disabled>Download CSV For CommCare</button>
 
 <script>
 
@@ -143,6 +144,7 @@
     let clustersDataExists = false;
     let gridsDataExists = false;
     let lastFetchedData = {}
+    let gridAssignments = new Map()
     function toggleInputFields() {
         var method = document.getElementById("clusteringType").value;
         document.getElementById("noOfClustersIP").style.display = (method === "kMeans") ? "block" : "none";
@@ -226,7 +228,7 @@
 
     let drawnGrids = [];
 
-    function drawGrids(data) {
+    function drawGrids1(data) {
         if (!data.clusters || !data.buildings) return;
 
         // Reset global drawn grids
@@ -366,7 +368,7 @@
                 if (newBoundary) {
                     const color = getColorForNumber(parseInt(clusterId));
                     const boundaryLayer = L.geoJSON(newBoundary, { color: color, fillOpacity: 0 });
-                    boundaryLayer.bindPopup(`Cluster ${clusterId} \n Number of Buildings: ${points.length}`);
+                    boundaryLayer.bindPopup(`Service Area ${clusterId} \n Number of Buildings: ${points.length}`);
                     clusterLayer.addLayer(boundaryLayer);
                 }
             }
@@ -384,6 +386,161 @@
         lastFetchedData = data
     }
 
+    function drawGrids(data) {
+    if (!data.clusters || !data.buildings) return null; // Return null if data is invalid
+
+    // Reset global drawn grids
+    drawnGrids = [];
+
+    // Track assigned buildings to prevent reassignment
+    const assignedBuildings = new Set();
+
+    // Step 1: Group clusters and compute initial boundaries using building centroids
+    const clusterGroups = {};
+    const boundaries = {};
+    data.clusters.forEach((feature, index) => {
+        const { cluster, coordinates } = feature;
+        if (clusteringType !== 'dbScan' || cluster !== -1) {
+            if (!clusterGroups[cluster]) {
+                clusterGroups[cluster] = { points: [], indices: [] };
+            }
+            clusterGroups[cluster].points.push(coordinates);
+            clusterGroups[cluster].indices.push(index);
+        }
+    });
+
+    // Compute boundaries using centroids
+    Object.entries(clusterGroups).forEach(([clusterId, { points }]) => {
+        if (points.length > 2) {
+            const turfPoints = points.map(p => turf.point(p));
+            const featureCollection = turf.featureCollection(turfPoints);
+            boundaries[clusterId] = turf.convex(featureCollection);
+        }
+    });
+
+    // Step 2: Compute a single grid over the entire area encompassing all building centroids
+    const allBuildingsFeatureCollection = turf.featureCollection(data.clusters.map(c => turf.point(c.coordinates)));
+    const overallBbox = turf.bbox(allBuildingsFeatureCollection);
+    const gridSize = parseInt(document.getElementById("gridLength").value) || 50;
+    const gridSizeDeg = gridSize / 111000;
+    const grid = turf.squareGrid(overallBbox, gridSizeDeg, { units: 'degrees' });
+
+    // Step 3: Assign grids to clusters based on intersection and area, skipping grids with no buildings
+    turf.featureEach(grid, (currentGrid, gridIndex) => {
+        // Check if the grid contains any buildings (based on centroids)
+        const buildingsInGrid = turf.featureCollection(
+            allBuildingsFeatureCollection.features.filter((point, buildingIndex) => {
+                return turf.booleanPointInPolygon(point, currentGrid);
+            })
+        );
+
+        // Skip the grid if it contains no buildings
+        if (buildingsInGrid.features.length === 0) {
+            return; // Skip to the next grid
+        }
+
+        // If the grid has buildings, proceed with cluster assignment
+        const intersectingClusters = [];
+        Object.entries(boundaries).forEach(([clusterId, boundary]) => {
+            const intersection = turf.intersect(currentGrid, boundary);
+            if (intersection) {
+                const area = turf.area(intersection);
+                intersectingClusters.push({ clusterId, area });
+            }
+        });
+
+        if (intersectingClusters.length > 0) {
+            // Sort by area to find the majority cluster
+            intersectingClusters.sort((a, b) => b.area - a.area);
+            const majorityCluster = intersectingClusters[0].clusterId;
+            gridAssignments.set(gridIndex, { clusterId: majorityCluster, area: intersectingClusters[0].area });
+
+            // Draw the grid with the majority cluster's color
+            const color = getColorForNumber(parseInt(majorityCluster));
+            L.geoJSON(currentGrid, { style: { color: color, weight: 1, fillOpacity: 0 } }).addTo(densityLayer);
+            drawnGrids.push(currentGrid);
+
+            // Reassign buildings to the majority cluster
+            const buildingsToDraw = [];
+            buildingsInGrid.features.forEach((point, pointIndex) => {
+                // Find the corresponding index in data.clusters
+                const buildingIndex = data.clusters.findIndex(c => 
+                    c.coordinates[0] === point.geometry.coordinates[0] && 
+                    c.coordinates[1] === point.geometry.coordinates[1]
+                );
+                if (buildingIndex !== -1) {
+                    const coordKey = `${data.clusters[buildingIndex].coordinates[0]},${data.clusters[buildingIndex].coordinates[1]}`;
+                    if (!assignedBuildings.has(coordKey)) {
+                        data.clusters[buildingIndex].cluster = parseInt(majorityCluster);
+                        assignedBuildings.add(coordKey);
+
+                        const buildingFeature = data.buildings.features[buildingIndex];
+                        if (buildingFeature) {
+                            buildingFeature.properties.cluster_label = parseInt(majorityCluster);
+                            buildingsToDraw.push(buildingFeature);
+                        }
+                    }
+                }
+            });
+
+            // Draw the buildings in this grid
+            if (buildingsToDraw.length > 0) {
+                const buildingsGeoJSON = turf.featureCollection(buildingsToDraw);
+                L.geoJSON(buildingsGeoJSON, {
+                    style: function (feature) {
+                        const clusterLabel = feature.properties.cluster_label;
+                        return {
+                            color: getColorForNumber(clusterLabel),
+                            weight: 1,
+                            fillOpacity: 0.9
+                        };
+                    }
+                }).addTo(buildingsLayer);
+            }
+        }
+    });
+
+    // Step 4: Redraw cluster boundaries with updated building assignments
+    clusterLayer.clearLayers(); // Clear previous boundaries
+    const updatedClusterGroups = {};
+    let noOfClusters = 0;
+    data.clusters.forEach((feature, index) => {
+        const { cluster, coordinates } = feature;
+        if (clusteringType !== 'dbScan' || cluster !== -1) {
+            if (!updatedClusterGroups[cluster]) {
+                noOfClusters +=1
+                updatedClusterGroups[cluster] = { points: [] };
+            }
+            updatedClusterGroups[cluster].points.push(coordinates);
+        }
+    });
+    document.getElementById('cluster-count-val').innerText = noOfClusters;
+
+    Object.entries(updatedClusterGroups).forEach(([clusterId, { points }]) => {
+        if (points.length > 2) {
+            const turfPoints = points.map(p => turf.point(p));
+            const featureCollection = turf.featureCollection(turfPoints);
+            const newBoundary = turf.convex(featureCollection);
+            if (newBoundary) {
+                const color = getColorForNumber(parseInt(clusterId));
+                const boundaryLayer = L.geoJSON(newBoundary, { color: color, fillOpacity: 0 });
+                boundaryLayer.bindPopup(`Service Area ${clusterId} \n Number of Buildings: ${points.length}`);
+                clusterLayer.addLayer(boundaryLayer);
+            }
+        }
+    });
+
+    // Step 5: Final sync
+    const buildingsGeoJSON = data.buildings;
+    buildingsGeoJSON.features.forEach((feature, index) => {
+        const matchingCluster = data.clusters[index];
+        if (matchingCluster) {
+            feature.properties.cluster_label = matchingCluster.cluster;
+        }
+    });
+    data.buildings = buildingsGeoJSON;
+    lastFetchedData = data
+}
     function clearClusters() {
         buildingsLayer.clearLayers();
         clusterLayer.clearLayers();
@@ -391,12 +548,14 @@
         document.getElementById('cluster-count-val').innerText = 0;
         resetFields()
         enableOrDisableFields("download-csv" ,!(gridsDataExists))
+        enableOrDisableFields("download-csv-commcare" ,!(gridsDataExists))
         enableOrDisableFields("clear-clusters", true);
     }
 
     function resetFields() {
         gridsDataExists = false;
         lastFetchedData = {}
+        gridAssignments = new Map()
     }
 
         function enableOrDisableFields(field, disable) {
@@ -520,7 +679,9 @@
         enableOrDisableFields("clear-oa", true);
         gridsDataExists = false
         lastFetchedData = {}
+        gridAssignments = new Map()
         enableOrDisableFields("download-csv" ,!gridsDataExists)
+        enableOrDisableFields("download-csv-commcare" ,!gridsDataExists)
         let thresholdVal = document.getElementById("thresholdVal").value || 0.5;
         let clusteringType = document.getElementById("clusteringType").value;
         let noOfClusters = document.getElementById("noOfClusters").value;
@@ -554,6 +715,7 @@
                 drawGrids(data);
                 gridsDataExists = true
                 enableOrDisableFields("download-csv" ,!gridsDataExists)
+                enableOrDisableFields("download-csv-commcare" ,!gridsDataExists)
             }
         })
         .catch(error => {
@@ -930,6 +1092,78 @@ function downloadGmapData(data) {
         reader.onerror = () => showToast("Error reading CSV file.", "error", 3000, "#FF0000");
         reader.readAsText(file);
     }
+
+    function downloadCsvForCommCare(data, gridAssignments) {
+    if (!data.clusters || !data.buildings || !drawnGrids || !gridAssignments) {
+        console.error("Missing data, drawnGrids, or gridAssignments for download");
+        return;
+    }
+
+    // CSV header
+    let csvContent = "name,delivery_target,delivery_count,radius,centroid,bounding_box,service_area,flw,WKT,distance between adj sides 1,distance between adj sides 2,#Buildings,Surface Area (sq. meters)\n";
+
+    // Process each grid in drawnGrids
+    drawnGrids.forEach((grid, index) => {
+        const geometry = grid.geometry;
+        if (geometry && geometry.type === "Polygon" && Array.isArray(geometry.coordinates)) {
+            // Column 1: name (grid {grid_no})
+            const gridName = `Delivery Unit ${index + 1}`;
+
+            // Column 2: delivery_target (fixed value: 1)
+            const deliveryTarget = 1;
+
+            // Column 3: delivery_count (fixed value: 1)
+            const deliveryCount = 1;
+
+            // Column 4: radius (radius of the grid's circumscribed circle in meters)
+            const bbox = turf.bbox(grid);
+            const widthDeg = bbox[2] - bbox[0]; // Longitude difference
+            const heightDeg = bbox[3] - bbox[1]; // Latitude difference
+            // Convert degrees to meters (approximation: 1 degree ≈ 111,000 meters at equator)
+            const widthMeters = widthDeg * 111000 * Math.cos(turf.centroid(grid).geometry.coordinates[1] * Math.PI / 180);
+            const heightMeters = heightDeg * 111000;
+            const diagonal = Math.sqrt(widthMeters * widthMeters + heightMeters * heightMeters);
+            const radius = diagonal / 2; // Radius of circumscribed circle (diagonal/2)
+
+            // Column 5: centroid (latitude, longitude of the grid's centroid)
+            const centroid = turf.centroid(grid).geometry.coordinates;
+            const centroidStr = `${centroid[1]} ${centroid[0]}`; // Format as "lat,lon"
+
+            // Column 6: serviceArea (cluster number from gridAssignments)
+            const serviceArea = gridAssignments.get(index)?.clusterId || "Unassigned";
+            
+            const boundingBox = geometry.coordinates[0].map(coord => `${coord[1]} ${coord[0]}`).join(' ');
+            // Column 7: WKT (WKT representation of the grid)
+            const coords = geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
+            const wkt = `POLYGON ((${coords}, ${geometry.coordinates[0][0][0]} ${geometry.coordinates[0][0][1]}))`;
+
+            // Column 8: distance between adj sides 1 (distance between vertical sides in meters)
+            const distanceVertical = widthMeters; // Already computed as width in meters
+
+            // Column 9: distance between adj sides 2 (distance between horizontal sides in meters)
+            const distanceHorizontal = heightMeters; // Already computed as height in meters
+
+            // Column 10: #Buildings (number of buildings in the grid)
+            const buildingsInGrid = data.clusters.filter(c => {
+                const point = turf.point(c.coordinates);
+                return turf.booleanPointInPolygon(point, grid);
+            });
+            const numBuildings = buildingsInGrid.length;
+
+            // Column 11: Surface Area (sq. meters) (area of the grid in square meters)
+            const surfaceArea = turf.area(grid);
+
+            // Add row to CSV
+            csvContent += `"${gridName}",${deliveryTarget},${deliveryCount},${radius},"${centroidStr}",${boundingBox},${serviceArea},"","${wkt}",${distanceVertical},${distanceHorizontal},${numBuildings},${surfaceArea}\n`;
+        } else {
+            console.error("Invalid grid geometry at index", index, ":", grid);
+        }
+    });
+
+    // Download the CSV file
+    downloadCsv(csvContent, 'csv_for_CommCare.csv');
+    showToast("Grid comparison CSV downloaded!", "success", 3000, "#00FF00");
+}
 </script>
 
 </body>
