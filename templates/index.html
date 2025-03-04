@@ -137,8 +137,8 @@
 <script>
 
 
-    const hostUrl = "https://map-clustering.onrender.com"
-    // const hostUrl = "http://localhost:5000"
+    // const hostUrl = "https://map-clustering.onrender.com"
+    const hostUrl = "http://localhost:5000"
     // let oaLangLats = [[7.804194540880652, 13.297389280292863],[7.804194540880652, 13.30901630923803],[7.789090347698152, 13.30901630923803],[7.789090347698152, 13.297389280292863]]
     let oaLangLats = []
     let clustersDataExists = false;
@@ -387,160 +387,168 @@
     }
 
     function drawGrids(data) {
-    if (!data.clusters || !data.buildings) return null; // Return null if data is invalid
+        if (!data.clusters || !data.buildings) return null; // Return null if data is invalid
 
-    // Reset global drawn grids
-    drawnGrids = [];
+        // Reset global drawn grids
+        drawnGrids = [];
 
-    // Track assigned buildings to prevent reassignment
-    const assignedBuildings = new Set();
+        // Track assigned buildings to prevent reassignment
+        const assignedBuildings = new Set();
 
-    // Step 1: Group clusters and compute initial boundaries using building centroids
-    const clusterGroups = {};
-    const boundaries = {};
-    data.clusters.forEach((feature, index) => {
-        const { cluster, coordinates } = feature;
-        if (clusteringType !== 'dbScan' || cluster !== -1) {
-            if (!clusterGroups[cluster]) {
-                clusterGroups[cluster] = { points: [], indices: [] };
-            }
-            clusterGroups[cluster].points.push(coordinates);
-            clusterGroups[cluster].indices.push(index);
-        }
-    });
-
-    // Compute boundaries using centroids
-    Object.entries(clusterGroups).forEach(([clusterId, { points }]) => {
-        if (points.length > 2) {
-            const turfPoints = points.map(p => turf.point(p));
-            const featureCollection = turf.featureCollection(turfPoints);
-            boundaries[clusterId] = turf.convex(featureCollection);
-        }
-    });
-
-    // Step 2: Compute a single grid over the entire area encompassing all building centroids
-    const allBuildingsFeatureCollection = turf.featureCollection(data.clusters.map(c => turf.point(c.coordinates)));
-    const overallBbox = turf.bbox(allBuildingsFeatureCollection);
-    const gridSize = parseInt(document.getElementById("gridLength").value) || 50;
-    const gridSizeDeg = gridSize / 111000;
-    const grid = turf.squareGrid(overallBbox, gridSizeDeg, { units: 'degrees' });
-
-    // Step 3: Assign grids to clusters based on intersection and area, skipping grids with no buildings
-    turf.featureEach(grid, (currentGrid, gridIndex) => {
-        // Check if the grid contains any buildings (based on centroids)
-        const buildingsInGrid = turf.featureCollection(
-            allBuildingsFeatureCollection.features.filter((point, buildingIndex) => {
-                return turf.booleanPointInPolygon(point, currentGrid);
-            })
-        );
-
-        // Skip the grid if it contains no buildings
-        if (buildingsInGrid.features.length === 0) {
-            return; // Skip to the next grid
-        }
-
-        // If the grid has buildings, proceed with cluster assignment
-        const intersectingClusters = [];
-        Object.entries(boundaries).forEach(([clusterId, boundary]) => {
-            const intersection = turf.intersect(currentGrid, boundary);
-            if (intersection) {
-                const area = turf.area(intersection);
-                intersectingClusters.push({ clusterId, area });
+        // Step 1: Group clusters and compute initial boundaries using building centroids
+        const clusterGroups = {};
+        const boundaries = {};
+        data.clusters.forEach((feature, index) => {
+            const { cluster, coordinates } = feature;
+            if (clusteringType !== 'dbScan' || cluster !== -1) {
+                if (!clusterGroups[cluster]) {
+                    clusterGroups[cluster] = { points: [], indices: [] };
+                }
+                clusterGroups[cluster].points.push(coordinates);
+                clusterGroups[cluster].indices.push(index);
             }
         });
 
-        if (intersectingClusters.length > 0) {
-            // Sort by area to find the majority cluster
-            intersectingClusters.sort((a, b) => b.area - a.area);
-            const majorityCluster = intersectingClusters[0].clusterId;
-            gridAssignments.set(gridIndex, { clusterId: majorityCluster, area: intersectingClusters[0].area });
+        // Compute boundaries using centroids
+        Object.entries(clusterGroups).forEach(([clusterId, { points }]) => {
+            if (points.length > 2) {
+                const turfPoints = points.map(p => turf.point(p));
+                const featureCollection = turf.featureCollection(turfPoints);
+                boundaries[clusterId] = turf.convex(featureCollection);
+            }
+        });
 
-            // Draw the grid with the majority cluster's color
-            const color = getColorForNumber(parseInt(majorityCluster));
-            L.geoJSON(currentGrid, { style: { color: color, weight: 1, fillOpacity: 0.2 } }).addTo(densityLayer);
-            drawnGrids.push(currentGrid);
+        // Step 2: Compute a single grid over the entire area encompassing all building centroids
+        const allBuildingsFeatureCollection = turf.featureCollection(data.clusters.map(c => turf.point(c.coordinates)));
+        const overallBbox = turf.bbox(allBuildingsFeatureCollection);
+        const gridSize = parseInt(document.getElementById("gridLength").value) || 50;
+        const gridSizeDeg = gridSize / 111000;
+        const grid = turf.squareGrid(overallBbox, gridSizeDeg, { units: 'degrees' });
 
-            // Reassign buildings to the majority cluster
-            const buildingsToDraw = [];
-            buildingsInGrid.features.forEach((point, pointIndex) => {
-                // Find the corresponding index in data.clusters
-                const buildingIndex = data.clusters.findIndex(c => 
-                    c.coordinates[0] === point.geometry.coordinates[0] && 
-                    c.coordinates[1] === point.geometry.coordinates[1]
-                );
-                if (buildingIndex !== -1) {
-                    const coordKey = `${data.clusters[buildingIndex].coordinates[0]},${data.clusters[buildingIndex].coordinates[1]}`;
-                    if (!assignedBuildings.has(coordKey)) {
-                        data.clusters[buildingIndex].cluster = parseInt(majorityCluster);
-                        assignedBuildings.add(coordKey);
+        // Step 3: Assign grids to clusters based on intersection and area, skipping grids with no buildings
+        turf.featureEach(grid, (currentGrid, gridIndex) => {
+            // Check if the grid contains any buildings (based on centroids)
+            const buildingsInGrid = turf.featureCollection(
+                allBuildingsFeatureCollection.features.filter((point, buildingIndex) => {
+                    return turf.booleanPointInPolygon(point, currentGrid);
+                })
+            );
 
-                        const buildingFeature = data.buildings.features[buildingIndex];
-                        if (buildingFeature) {
-                            buildingFeature.properties.cluster_label = parseInt(majorityCluster);
-                            buildingsToDraw.push(buildingFeature);
-                        }
-                    }
+            // Skip the grid if it contains no buildings
+            if (buildingsInGrid.features.length === 0) {
+                return; // Skip to the next grid
+            }
+
+            // If the grid has buildings, proceed with cluster assignment
+            const intersectingClusters = [];
+            Object.entries(boundaries).forEach(([clusterId, boundary]) => {
+                const intersection = turf.intersect(currentGrid, boundary);
+                if (intersection) {
+                    const area = turf.area(intersection);
+                    intersectingClusters.push({ clusterId, area });
                 }
             });
 
-            // Draw the buildings in this grid
-            if (buildingsToDraw.length > 0) {
-                const buildingsGeoJSON = turf.featureCollection(buildingsToDraw);
-                L.geoJSON(buildingsGeoJSON, {
-                    style: function (feature) {
-                        const clusterLabel = feature.properties.cluster_label;
-                        return {
-                            color: getColorForNumber(clusterLabel),
-                            weight: 1,
-                            fillOpacity: 0.9
-                        };
+            if (intersectingClusters.length > 0) {
+                // Sort by area to find the majority cluster
+                intersectingClusters.sort((a, b) => b.area - a.area);
+                const majorityCluster = intersectingClusters[0].clusterId;
+                gridAssignments.set(gridIndex, { clusterId: majorityCluster, area: intersectingClusters[0].area });
+
+                // Draw the grid with the majority cluster's color
+                const color = getColorForNumber(parseInt(majorityCluster));
+                // L.geoJSON(currentGrid, { style: { color: color, weight: 1, fillOpacity: 0.2 } }).addTo(densityLayer);
+                const gridLayer = L.geoJSON(currentGrid, { style: { color: color, weight: 1, fillOpacity: 0.2 } });
+                densityLayer.addLayer(gridLayer);
+                drawnGrids.push(currentGrid);
+
+                // Reassign buildings to the majority cluster
+                const buildingsToDraw = [];
+                buildingsInGrid.features.forEach((point, pointIndex) => {
+                    // Find the corresponding index in data.clusters
+                    const buildingIndex = data.clusters.findIndex(c => 
+                        c.coordinates[0] === point.geometry.coordinates[0] && 
+                        c.coordinates[1] === point.geometry.coordinates[1]
+                    );
+                    if (buildingIndex !== -1) {
+                        const coordKey = `${data.clusters[buildingIndex].coordinates[0]},${data.clusters[buildingIndex].coordinates[1]}`;
+                        if (!assignedBuildings.has(coordKey)) {
+                            data.clusters[buildingIndex].cluster = parseInt(majorityCluster);
+                            assignedBuildings.add(coordKey);
+
+                            const buildingFeature = data.buildings.features[buildingIndex];
+                            if (buildingFeature) {
+                                buildingFeature.properties.cluster_label = parseInt(majorityCluster);
+                                buildingsToDraw.push(buildingFeature);
+                            }
+                        }
                     }
-                }).addTo(buildingsLayer);
-            }
-        }
-    });
+                });
 
-    // Step 4: Redraw cluster boundaries with updated building assignments
-    clusterLayer.clearLayers(); // Clear previous boundaries
-    const updatedClusterGroups = {};
-    let noOfClusters = 0;
-    data.clusters.forEach((feature, index) => {
-        const { cluster, coordinates } = feature;
-        if (clusteringType !== 'dbScan' || cluster !== -1) {
-            if (!updatedClusterGroups[cluster]) {
-                noOfClusters +=1
-                updatedClusterGroups[cluster] = { points: [] };
+                // Draw the buildings in this grid
+                if (buildingsToDraw.length > 0) {
+                    const buildingsGeoJSON = turf.featureCollection(buildingsToDraw);
+                    L.geoJSON(buildingsGeoJSON, {
+                        style: function (feature) {
+                            const clusterLabel = feature.properties.cluster_label;
+                            return {
+                                color: getColorForNumber(clusterLabel),
+                                weight: 1,
+                                fillOpacity: 0.9
+                            };
+                        }
+                    }).addTo(buildingsLayer);
+                }
             }
-            updatedClusterGroups[cluster].points.push(coordinates);
-        }
-    });
-    document.getElementById('cluster-count-val').innerText = noOfClusters;
+        });
 
-    Object.entries(updatedClusterGroups).forEach(([clusterId, { points }]) => {
-        if (points.length > 2) {
-            const turfPoints = points.map(p => turf.point(p));
-            const featureCollection = turf.featureCollection(turfPoints);
-            const newBoundary = turf.convex(featureCollection);
-            if (newBoundary) {
-                const color = getColorForNumber(parseInt(clusterId));
-                const boundaryLayer = L.geoJSON(newBoundary, { color: color, fillOpacity: 0 });
-                boundaryLayer.bindPopup(`Service Area ${clusterId} \n Number of Buildings: ${points.length}`);
-                clusterLayer.addLayer(boundaryLayer);
+        // Step 4: Redraw cluster boundaries with updated building assignments
+        clusterLayer.clearLayers(); // Clear previous boundaries
+        const updatedClusterGroups = {};
+        let noOfClusters = 0;
+        data.clusters.forEach((feature, index) => {
+            const { cluster, coordinates } = feature;
+            if (clusteringType !== 'dbScan' || cluster !== -1) {
+                if (!updatedClusterGroups[cluster]) {
+                    noOfClusters +=1
+                    updatedClusterGroups[cluster] = { points: [] };
+                }
+                updatedClusterGroups[cluster].points.push(coordinates);
             }
-        }
-    });
+        });
+        document.getElementById('cluster-count-val').innerText = noOfClusters;
 
-    // Step 5: Final sync
-    const buildingsGeoJSON = data.buildings;
-    buildingsGeoJSON.features.forEach((feature, index) => {
-        const matchingCluster = data.clusters[index];
-        if (matchingCluster) {
-            feature.properties.cluster_label = matchingCluster.cluster;
-        }
-    });
-    data.buildings = buildingsGeoJSON;
-    lastFetchedData = data
-}
+        Object.entries(updatedClusterGroups).forEach(([clusterId, { points }]) => {
+            if (points.length > 2) {
+                const turfPoints = points.map(p => turf.point(p));
+                const featureCollection = turf.featureCollection(turfPoints);
+                const newBoundary = turf.convex(featureCollection);
+                if (newBoundary) {
+                    const color = getColorForNumber(parseInt(clusterId));
+                    const boundaryLayer = L.geoJSON(newBoundary, { color: color, fillOpacity: 0 });
+
+                    boundaryLayer.bindTooltip(`Service Area ${clusterId} \n Number of Buildings: ${points.length}`, {
+                        sticky: true,
+                        direction: 'auto',
+                        opacity: 0.9
+                    });
+
+                    clusterLayer.addLayer(boundaryLayer);
+                }
+            }
+        });
+
+        // Step 5: Final sync
+        const buildingsGeoJSON = data.buildings;
+        buildingsGeoJSON.features.forEach((feature, index) => {
+            const matchingCluster = data.clusters[index];
+            if (matchingCluster) {
+                feature.properties.cluster_label = matchingCluster.cluster;
+            }
+        });
+        data.buildings = buildingsGeoJSON;
+        lastFetchedData = data
+    }
     function clearClusters() {
         buildingsLayer.clearLayers();
         clusterLayer.clearLayers();
