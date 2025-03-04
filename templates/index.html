@@ -304,9 +304,9 @@
 
                 // Draw the grid with the majority cluster's color
                 const color = getColorForNumber(parseInt(majorityCluster));
-                // L.geoJSON(currentGrid, { style: { color: color, weight: 1, fillOpacity: 0.2 } }).addTo(densityLayer);
-                const gridLayer = L.geoJSON(currentGrid, { style: { color: color, weight: 1, fillOpacity: 0.2 } });
+                const gridLayer = L.geoJSON(currentGrid, { style: { color: "black", weight: 1, fillOpacity: 0 } });
                 densityLayer.addLayer(gridLayer);
+                currentGrid['cluster'] = majorityCluster;
                 drawnGrids.push(currentGrid);
 
                 // Reassign buildings to the majority cluster
@@ -339,7 +339,7 @@
                         style: function (feature) {
                             const clusterLabel = feature.properties.cluster_label;
                             return {
-                                color: getColorForNumber(clusterLabel),
+                                color: "black",
                                 weight: 1,
                                 fillOpacity: 0.9
                             };
@@ -372,7 +372,7 @@
                 const newBoundary = turf.convex(featureCollection);
                 if (newBoundary) {
                     const color = getColorForNumber(parseInt(clusterId));
-                    const boundaryLayer = L.geoJSON(newBoundary, { color: color, fillOpacity: 0 });
+                    const boundaryLayer = L.geoJSON(newBoundary, { color: color, fillOpacity: 0.5 });
 
                     boundaryLayer.bindTooltip(`Service Area ${clusterId} \n Number of Buildings: ${points.length}`, {
                         sticky: true,
@@ -754,95 +754,106 @@
         downloadCsv(clusterCsvContent, 'sample_csv_file.csv');
     }
 
-
-function downloadGmapData(data) {
-    if (!data.clusters || !data.buildings) {
-        console.error("Missing clusters or buildings data for download");
-        return;
-    }
-
-    // Step 1: Generate CSV for clusters (boundaries)
-    const clusterGroups = {};
-    let noOfClusters = 0;
-    data.clusters.forEach((feature) => {
-        const { cluster, coordinates, numOfBuildings } = feature;
-        // Assuming clusteringType is accessible globally; adjust if needed
-        if (clusteringType !== 'dbScan' || cluster !== -1) {
-            if (!clusterGroups[cluster]) {
-                noOfClusters += 1;
-                clusterGroups[cluster] = { points: [], numOfBuildings: 0 };
-            }
-            clusterGroups[cluster].points.push(coordinates);
-            clusterGroups[cluster].numOfBuildings = numOfBuildings || 0; // Ensure numOfBuildings is defined
+    function downloadGmapData(data) {
+        if (!data.clusters || !data.buildings) {
+            console.error("Missing clusters or buildings data for download");
+            return;
         }
-    });
 
-    let clusterCsvContent = "WKT,name,description\n";
-    Object.entries(clusterGroups).forEach(([clusterId, { points, numOfBuildings }]) => {
-        if (points.length > 2) {
-            const turfPoints = points.map(p => turf.point(p));
-            const featureCollection = turf.featureCollection(turfPoints);
-            const boundary = turf.convex(featureCollection);
+        // Step 1: Recompute cluster groups with updated assignments
+        const clusterGroups = {};
+        let noOfClusters = 0;
+        const clusterBuildingCounts = {};
 
-            if (boundary) {
-                // Extract polygon coordinates and convert to WKT
-                const coords = boundary.geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
-                const wkt = `POLYGON ((${coords}, ${boundary.geometry.coordinates[0][0][0]} ${boundary.geometry.coordinates[0][0][1]}))`;
-                const name = `Cluster ${clusterId}`;
-                const description = `${numOfBuildings} buildings`;
-                clusterCsvContent += `"${wkt}",${name},${description}\n`;
-            } else {
-                console.warn(`Could not compute boundary for cluster ${clusterId}`);
+        // Count buildings per cluster after reassignment
+        data.clusters.forEach((feature, index) => {
+            const { cluster, coordinates } = feature;
+            if (clusteringType !== 'dbScan' || cluster !== -1) {
+                if (!clusterBuildingCounts[cluster]) {
+                    clusterBuildingCounts[cluster] = 0;
+                }
+                clusterBuildingCounts[cluster]++;
             }
+        });
+
+        // Group clusters for boundaries
+        data.clusters.forEach((feature) => {
+            const { cluster, coordinates } = feature;
+            if (clusteringType !== 'dbScan' || cluster !== -1) {
+                if (!clusterGroups[cluster]) {
+                    noOfClusters += 1;
+                    clusterGroups[cluster] = { points: [], numOfBuildings: 0 };
+                }
+                clusterGroups[cluster].points.push(coordinates);
+                clusterGroups[cluster].numOfBuildings = clusterBuildingCounts[cluster] || 0;
+            }
+        });
+
+        let clusterCsvContent = "WKT,name,description\n";
+        Object.entries(clusterGroups).forEach(([clusterId, { points, numOfBuildings }]) => {
+            if (points.length > 2) {
+                const turfPoints = points.map(p => turf.point(p));
+                const featureCollection = turf.featureCollection(turfPoints);
+                const boundary = turf.convex(featureCollection);
+
+                if (boundary) {
+                    const coords = boundary.geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
+                    const wkt = `POLYGON ((${coords}, ${boundary.geometry.coordinates[0][0][0]} ${boundary.geometry.coordinates[0][0][1]}))`;
+                    const name = `Cluster ${clusterId}`;
+                    const description = `${numOfBuildings} buildings`; // Use updated count
+                    clusterCsvContent += `"${wkt}",${name},${description}\n`;
+                } else {
+                    console.warn(`Could not compute boundary for cluster ${clusterId}`);
+                }
+            }
+        });
+
+        // Step 2: Generate CSV for grids (using drawnGrids)
+        if (drawnGrids && drawnGrids.length > 0) {
+            drawnGrids.forEach((grid, index) => {
+                const geometry = grid.geometry;
+                if (geometry && geometry.type === "Polygon" && Array.isArray(geometry.coordinates)) {
+                    const coords = geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
+                    const wkt = `POLYGON ((${coords}, ${geometry.coordinates[0][0][0]} ${geometry.coordinates[0][0][1]}))`;
+                    const name = `Grid ${index + 1}`;
+
+                    // Count buildings in this grid for description
+                    const buildingsInGrid = data.clusters.filter(c => {
+                        const point = turf.point(c.coordinates);
+                        return turf.booleanPointInPolygon(point, grid);
+                    });
+                    const description = `${buildingsInGrid.length} buildings`;
+                    clusterCsvContent += `"${wkt}",${name},${description}\n`;
+                } else {
+                    console.error("Invalid grid geometry at index", index, ":", grid);
+                }
+            });
+        } else {
+            console.warn("No grids available to export");
         }
-    });
 
-    // Step 2: Generate CSV for grids (using drawnGrids)
-
-    if (drawnGrids && drawnGrids.length > 0) {
-        drawnGrids.forEach((grid, index) => {
-            const geometry = grid.geometry;
+        // Step 3: Generate CSV for buildings using updated data.buildings
+        let buildingsCsvContent = "WKT,name,description\n";
+        data.buildings.features.forEach((feature, index) => {
+            const geometry = feature.geometry;
             if (geometry && geometry.type === "Polygon" && Array.isArray(geometry.coordinates)) {
                 const coords = geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
                 const wkt = `POLYGON ((${coords}, ${geometry.coordinates[0][0][0]} ${geometry.coordinates[0][0][1]}))`;
-                const name = `Grid ${index + 1}`;
-
-                // Count buildings in this grid for description
-                const buildingsInGrid = data.clusters.filter(c => {
-                    const point = turf.point(c.coordinates);
-                    return turf.booleanPointInPolygon(point, grid);
-                });
-                const description = `${buildingsInGrid.length} buildings`;
-                clusterCsvContent += `"${wkt}",${name},${description}\n`;
+                const clusterLabel = feature.properties.cluster_label !== undefined ? feature.properties.cluster_label : "Unassigned";
+                const name = `Building ${index + 1}`;
+                const description = `Cluster: ${clusterLabel}`;
+                buildingsCsvContent += `"${wkt}",${name},${description}\n`;
             } else {
-                console.error("Invalid grid geometry at index", index, ":", grid);
+                console.error("Invalid building geometry at index", index, ":", feature);
             }
         });
-    } else {
-        console.warn("No grids available to export");
+
+        // Step 4: Download the CSV files
+        downloadCsv(clusterCsvContent, 'service_area_&_delivery_units.csv');
+        downloadCsv(buildingsCsvContent, 'buildings.csv');
+        showToast("CSV downloaded! Import into Google My Maps at mymaps.google.com.", "success", 3000, "#00FF00");
     }
 
-    // Step 3: Generate CSV for buildings using updated data.buildings
-    let buildingsCsvContent = "WKT,name,description\n";
-    data.buildings.features.forEach((feature, index) => {
-        const geometry = feature.geometry;
-        if (geometry && geometry.type === "Polygon" && Array.isArray(geometry.coordinates)) {
-            const coords = geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
-            const wkt = `POLYGON ((${coords}, ${geometry.coordinates[0][0][0]} ${geometry.coordinates[0][0][1]}))`;
-            const clusterLabel = feature.properties.cluster_label !== undefined ? feature.properties.cluster_label : "Unassigned";
-            const name = `Building ${index + 1}`;
-            const description = `Cluster: ${clusterLabel}`;
-            buildingsCsvContent += `"${wkt}",${name},${description}\n`;
-        } else {
-            console.error("Invalid building geometry at index", index, ":", feature);
-        }
-    });
-
-    // Step 4: Download the CSV files
-    downloadCsv(clusterCsvContent, 'service_area_&_delivery_units.csv');
-    downloadCsv(buildingsCsvContent, 'buildings.csv');
-    showToast("CSV downloaded! Import into Google My Maps at mymaps.google.com.", "success", 3000, "#00FF00");
-}
     function downloadCsv(csvContent, fileName) {
         const blob = new Blob([csvContent], { type: "text/csv" });
         const url = window.URL.createObjectURL(blob);
@@ -956,7 +967,7 @@ function downloadGmapData(data) {
             const centroidStr = `${centroid[1]} ${centroid[0]}`; // Format as "lat,lon"
 
             // Column 6: serviceArea (cluster number from gridAssignments)
-            const serviceArea = gridAssignments.get(index)?.clusterId || "Unassigned";
+            const serviceArea = grid.cluster;
             
             const boundingBox = geometry.coordinates[0].map(coord => `${coord[1]} ${coord[0]}`).join(' ');
             // Column 7: WKT (WKT representation of the grid)
