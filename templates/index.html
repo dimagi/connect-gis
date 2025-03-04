@@ -457,7 +457,7 @@
 
             // Draw the grid with the majority cluster's color
             const color = getColorForNumber(parseInt(majorityCluster));
-            L.geoJSON(currentGrid, { style: { color: color, weight: 1, fillOpacity: 0 } }).addTo(densityLayer);
+            L.geoJSON(currentGrid, { style: { color: color, weight: 1, fillOpacity: 0.2 } }).addTo(densityLayer);
             drawnGrids.push(currentGrid);
 
             // Reassign buildings to the majority cluster
