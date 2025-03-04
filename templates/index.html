@@ -128,23 +128,25 @@
 </div>
 
 <button onclick="fetchData(oaLangLats, false)" id="run-clustering" disabled>Get Service Areas</button>
-<button onclick="getGrids(oaLangLats)" disabled id="get-grids" hidden>Get Delivery Units</button>
+<button onclick="drawGrids(lastFetchedData)" disabled id="get-grids" disabled>Get Delivery Units</button>
 <button onclick="clearClusters();" id = "clear-clusters" disabled>Clear Service Areas</button>
+<button onclick="clearGrids(); addClusters(lastFetchedData)" id = "clear-grids" disabled>Clear Delivery Units</button>
 <button onclick="clearOA();" id = "clear-oa" disabled>Clear Map</button>
-<button onclick="downloadGmapData(lastFetchedData);" id = "download-csv" disabled>Download CSV For My Maps</button>
-<button onclick="downloadCsvForCommCare(lastFetchedData, gridAssignments);" id = "download-csv-commcare" disabled>Download CSV For CommCare</button>
+<button onclick="downloadGmapData(gridsData);" id = "download-csv" disabled>Download CSV For My Maps</button>
+<button onclick="downloadCsvForCommCare(gridsData, gridAssignments);" id = "download-csv-commcare" disabled>Download CSV For CommCare</button>
 
 <script>
 
 
     // const hostUrl = "https://map-clustering.onrender.com"
     const hostUrl = "http://localhost:5000"
-    // let oaLangLats = [[7.804194540880652, 13.297389280292863],[7.804194540880652, 13.30901630923803],[7.789090347698152, 13.30901630923803],[7.789090347698152, 13.297389280292863]]
+
     let oaLangLats = []
     let clustersDataExists = false;
     let gridsDataExists = false;
     let lastFetchedData = {}
     let gridAssignments = new Map()
+    let gridsData = {}
     function toggleInputFields() {
         var method = document.getElementById("clusteringType").value;
         document.getElementById("noOfClustersIP").style.display = (method === "kMeans") ? "block" : "none";
@@ -228,169 +230,14 @@
 
     let drawnGrids = [];
 
-    function drawGrids1(data) {
-        if (!data.clusters || !data.buildings) return;
-
-        // Reset global drawn grids
-        drawnGrids = [];
-
-        // Track assigned buildings to prevent reassignment
-        const assignedBuildings = new Set();
-
-        // Step 1: Group clusters and compute initial boundaries using building centroids
-        const clusterGroups = {};
-        const boundaries = {};
-        data.clusters.forEach((feature, index) => {
-            const { cluster, coordinates } = feature;
-            if (clusteringType !== 'dbScan' || cluster !== -1) {
-                if (!clusterGroups[cluster]) {
-                    clusterGroups[cluster] = { points: [], indices: [] };
-                }
-                clusterGroups[cluster].points.push(coordinates);
-                clusterGroups[cluster].indices.push(index);
-            }
-        });
-
-        // Compute boundaries using centroids
-        Object.entries(clusterGroups).forEach(([clusterId, { points }]) => {
-            if (points.length > 2) {
-                const turfPoints = points.map(p => turf.point(p));
-                const featureCollection = turf.featureCollection(turfPoints);
-                boundaries[clusterId] = turf.convex(featureCollection);
-            }
-        });
-
-        const clusterPoints = []; data.clusters.forEach((feature) => { clusterPoints.push(turf.point(feature.coordinates, { cluster: feature.cluster })); }); if (clusterPoints.length > 2) { const voronoi = turf.voronoi(turf.featureCollection(clusterPoints), { bbox: turf.bbox(turf.featureCollection(clusterPoints)) }); }
-
-        // Step 2: Compute a single grid over the entire area encompassing all building centroids
-        const allBuildingsFeatureCollection = turf.featureCollection(data.clusters.map(c => turf.point(c.coordinates)));
-        const overallBbox = turf.bbox(allBuildingsFeatureCollection);
-        const gridSize = parseInt(document.getElementById("gridLength").value) || 50;
-        const gridSizeDeg = gridSize / 111000;
-        const grid = turf.squareGrid(overallBbox, gridSizeDeg, { units: 'degrees' });
-
-        // Track grid assignments
-        const gridAssignments = new Map(); // Maps grid index to { clusterId, area }
-
-        // Step 3: Assign grids to clusters based on intersection and area, skipping grids with no buildings
-        turf.featureEach(grid, (currentGrid, gridIndex) => {
-            // Check if the grid contains any buildings (based on centroids)
-            const buildingsInGrid = turf.featureCollection(
-                allBuildingsFeatureCollection.features.filter((point, buildingIndex) => {
-                    return turf.booleanPointInPolygon(point, currentGrid);
-                })
-            );
-
-            // Skip the grid if it contains no buildings
-            if (buildingsInGrid.features.length === 0) {
-                return; // Skip to the next grid
-            }
-
-            // If the grid has buildings, proceed with cluster assignment
-            const intersectingClusters = [];
-            Object.entries(boundaries).forEach(([clusterId, boundary]) => {
-                const intersection = turf.intersect(currentGrid, boundary);
-                if (intersection) {
-                    const area = turf.area(intersection);
-                    intersectingClusters.push({ clusterId, area });
-                }
-            });
-
-            if (intersectingClusters.length > 0) {
-                // Sort by area to find the majority cluster
-                intersectingClusters.sort((a, b) => b.area - a.area);
-                const majorityCluster = intersectingClusters[0].clusterId;
-                gridAssignments.set(gridIndex, { clusterId: majorityCluster, area: intersectingClusters[0].area });
-
-                // Draw the grid with the majority cluster's color
-                const color = getColorForNumber(parseInt(majorityCluster));
-                L.geoJSON(currentGrid, { style: { color: color, weight: 1, fillOpacity: 0 } }).addTo(densityLayer);
-                drawnGrids.push(currentGrid);
-
-                // Reassign buildings to the majority cluster
-                const buildingsToDraw = [];
-                buildingsInGrid.features.forEach((point, pointIndex) => {
-                    // Find the corresponding index in data.clusters
-                    const buildingIndex = data.clusters.findIndex(c => 
-                        c.coordinates[0] === point.geometry.coordinates[0] && 
-                        c.coordinates[1] === point.geometry.coordinates[1]
-                    );
-                    if (buildingIndex !== -1) {
-                        const coordKey = `${data.clusters[buildingIndex].coordinates[0]},${data.clusters[buildingIndex].coordinates[1]}`;
-                        if (!assignedBuildings.has(coordKey)) {
-                            data.clusters[buildingIndex].cluster = parseInt(majorityCluster);
-                            assignedBuildings.add(coordKey);
-
-                            const buildingFeature = data.buildings.features[buildingIndex];
-                            if (buildingFeature) {
-                                buildingFeature.properties.cluster_label = parseInt(majorityCluster);
-                                buildingsToDraw.push(buildingFeature);
-                            }
-                        }
-                    }
-                });
-
-                // Draw the buildings in this grid
-                if (buildingsToDraw.length > 0) {
-                    const buildingsGeoJSON = turf.featureCollection(buildingsToDraw);
-                    L.geoJSON(buildingsGeoJSON, {
-                        style: function (feature) {
-                            const clusterLabel = feature.properties.cluster_label;
-                            return {
-                                color: getColorForNumber(clusterLabel),
-                                weight: 1,
-                                fillOpacity: 0.9
-                            };
-                        }
-                    }).addTo(buildingsLayer);
-                }
-            }
-        });
-
-        // Step 4: Redraw cluster boundaries with updated building assignments
-        clusterLayer.clearLayers(); // Clear previous boundaries
-        const updatedClusterGroups = {};
-        data.clusters.forEach((feature, index) => {
-            const { cluster, coordinates } = feature;
-            if (clusteringType !== 'dbScan' || cluster !== -1) {
-                if (!updatedClusterGroups[cluster]) {
-                    updatedClusterGroups[cluster] = { points: [] };
-                }
-                updatedClusterGroups[cluster].points.push(coordinates);
-            }
-        });
-
-        Object.entries(updatedClusterGroups).forEach(([clusterId, { points }]) => {
-            if (points.length > 2) {
-                const turfPoints = points.map(p => turf.point(p));
-                const featureCollection = turf.featureCollection(turfPoints);
-                const newBoundary = turf.convex(featureCollection);
-                if (newBoundary) {
-                    const color = getColorForNumber(parseInt(clusterId));
-                    const boundaryLayer = L.geoJSON(newBoundary, { color: color, fillOpacity: 0 });
-                    boundaryLayer.bindPopup(`Service Area ${clusterId} \n Number of Buildings: ${points.length}`);
-                    clusterLayer.addLayer(boundaryLayer);
-                }
-            }
-        });
-
-        // Step 5: Final sync
-        const buildingsGeoJSON = data.buildings;
-        buildingsGeoJSON.features.forEach((feature, index) => {
-            const matchingCluster = data.clusters[index];
-            if (matchingCluster) {
-                feature.properties.cluster_label = matchingCluster.cluster;
-            }
-        });
-        data.buildings = buildingsGeoJSON;
-        lastFetchedData = data
-    }
-
-    function drawGrids(data) {
+    function drawGrids(lastFetchedData){
+        let data = JSON.parse(JSON.stringify(lastFetchedData))
+        gridsData = {}
         if (!data.clusters || !data.buildings) return null; // Return null if data is invalid
 
         // Reset global drawn grids
         drawnGrids = [];
+        densityLayer.clearLayers()
 
         // Track assigned buildings to prevent reassignment
         const assignedBuildings = new Set();
@@ -547,100 +394,115 @@
             }
         });
         data.buildings = buildingsGeoJSON;
-        lastFetchedData = data
+        gridsData = data
+        gridsDataExists = true
+        enableOrDisableFields("clear-grids", false);
+        enableOrDisableFields("download-csv" ,!gridsDataExists)
+        enableOrDisableFields("download-csv-commcare" ,!gridsDataExists)
     }
+
+    function clearGrids() {
+        gridsDataExists = false;
+        densityLayer.clearLayers();
+        enableOrDisableFields("clear-grids", true);
+        enableOrDisableFields("download-csv" ,!(gridsDataExists))
+        enableOrDisableFields("download-csv-commcare" ,!(gridsDataExists))
+    }
+
     function clearClusters() {
         buildingsLayer.clearLayers();
         clusterLayer.clearLayers();
-        densityLayer.clearLayers();
         document.getElementById('cluster-count-val').innerText = 0;
         resetFields()
-        enableOrDisableFields("download-csv" ,!(gridsDataExists))
-        enableOrDisableFields("download-csv-commcare" ,!(gridsDataExists))
+
         enableOrDisableFields("clear-clusters", true);
+        enableOrDisableFields("get-grids", true);
+        clearGrids()
     }
 
     function resetFields() {
         gridsDataExists = false;
         lastFetchedData = {}
         gridAssignments = new Map()
+        gridsData = {}
     }
 
-        function enableOrDisableFields(field, disable) {
-            document.getElementById(field).disabled = disable;
+    function enableOrDisableFields(field, disable) {
+        document.getElementById(field).disabled = disable;
+    }
+
+    function clearOA() {
+        oaLangLats = []
+        drawnItems.clearLayers();
+        enableOrDisableFields("run-clustering", true);
+        enableOrDisableFields("get-grids", true);
+        clearClusters()
+        enableOrDisableFields("clear-oa", true);
+        document.getElementById("uploaded-file-name").innerText = 'No File Chosen';
+    }
+
+    function addOrUpdatePolygon(layers) {
+        clearOA()
+        isDrawing = false;
+
+        // Get the polygon coordinates and close the loop
+        var latlngs = layers.getLatLngs()[0].map(coord => [coord.lat, coord.lng]);
+        latlngs.push(latlngs[0]); // Ensure polygon is closed
+
+        // Create and add the polygon layer
+        var polygonLayer = L.polygon(latlngs, {
+            color: 'blue',
+            weight: 1,
+            fillOpacity: 0
+        }).addTo(drawnItems);
+
+        // Fit map to polygon bounds
+        map.fitBounds(polygonLayer.getBounds());
+        oaLangLats = layers.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);
+        enableOrDisableFields("run-clustering", false);
+        enableOrDisableFields("clear-oa", false);
+    }
+
+    function addBuildings(data) {
+        buildingsLayer.clearLayers()
+        // Overlay building polygons
+        if (data.buildings) {
+            // Ensure that each feature gets the corresponding cluster label
+            data.buildings.features.forEach((feature, index) => {
+                feature.properties.cluster_label = data.buildings.cluster_label[index]; // Assign label to properties
+            });
+
+            // Now, render the GeoJSON with updated cluster labels
+            L.geoJSON(data.buildings, {
+                style: function (feature) {
+                    const clusterLabel = feature.properties.cluster_label; // Access updated label
+                    return {
+                        color: getColorForNumber(clusterLabel), // Assign color based on cluster
+                        weight: 1,
+                        fillOpacity: 0.9
+                    };
+                }
+            }).addTo(buildingsLayer);
         }
+    }
 
-        function clearOA() {
-            oaLangLats = []
-            drawnItems.clearLayers();
-            enableOrDisableFields("run-clustering", true);
-            enableOrDisableFields("get-grids", true);
-            clearClusters()
-            enableOrDisableFields("clear-oa", true);
-            document.getElementById("uploaded-file-name").innerText = 'No File Chosen';
+    function addGrids(data) {
+        if (data.grids) {
+            L.geoJSON(data.grids, {
+                style: function (feature) {
+                    return {
+                        color: "blue",
+                        weight: 1,
+                        fillOpacity: 0
+                    };
+                }
+            }).addTo(densityLayer);
+            lastFetchedData.grids = data.grids
         }
+    }
 
-        function addOrUpdatePolygon(layers) {
-            clearOA()
-            isDrawing = false;
-
-            // Get the polygon coordinates and close the loop
-            var latlngs = layers.getLatLngs()[0].map(coord => [coord.lat, coord.lng]);
-            latlngs.push(latlngs[0]); // Ensure polygon is closed
-
-            // Create and add the polygon layer
-            var polygonLayer = L.polygon(latlngs, {
-                color: 'blue',
-                weight: 1,
-                fillOpacity: 0
-            }).addTo(drawnItems);
-
-            // Fit map to polygon bounds
-            map.fitBounds(polygonLayer.getBounds());
-            oaLangLats = layers.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);
-            enableOrDisableFields("run-clustering", false);
-            enableOrDisableFields("get-grids", false);
-            enableOrDisableFields("clear-oa", false);
-        }
-
-        function addBuildings(data) {
-            // Overlay building polygons
-            if (data.buildings) {
-                // Ensure that each feature gets the corresponding cluster label
-                data.buildings.features.forEach((feature, index) => {
-                    feature.properties.cluster_label = data.buildings.cluster_label[index]; // Assign label to properties
-                });
-
-                // Now, render the GeoJSON with updated cluster labels
-                L.geoJSON(data.buildings, {
-                    style: function (feature) {
-                        const clusterLabel = feature.properties.cluster_label; // Access updated label
-                        return {
-                            color: getColorForNumber(clusterLabel), // Assign color based on cluster
-                            weight: 1,
-                            fillOpacity: 0.9
-                        };
-                    }
-                }).addTo(buildingsLayer);
-            }
-        }
-
-        function addGrids(data) {
-            if (data.grids) {
-                L.geoJSON(data.grids, {
-                    style: function (feature) {
-                        return {
-                            color: "blue",
-                            weight: 1,
-                            fillOpacity: 0
-                        };
-                    }
-                }).addTo(densityLayer);
-                lastFetchedData.grids = data.grids
-            }
-        }
-
-    function addClusters1(data) {
+    function addClusters(data) {
+        clusterLayer.clearLayers()
         if (data.clusters) {
             const clusterGroups = {};
             let noOfClusters = 0;
@@ -688,6 +550,7 @@
         gridsDataExists = false
         lastFetchedData = {}
         gridAssignments = new Map()
+        gridsData = {}
         enableOrDisableFields("download-csv" ,!gridsDataExists)
         enableOrDisableFields("download-csv-commcare" ,!gridsDataExists)
         let thresholdVal = document.getElementById("thresholdVal").value || 0.5;
@@ -720,10 +583,9 @@
                         : "Error fetching data";
 
                 lastFetchedData = data
-                drawGrids(data);
-                gridsDataExists = true
-                enableOrDisableFields("download-csv" ,!gridsDataExists)
-                enableOrDisableFields("download-csv-commcare" ,!gridsDataExists)
+                addBuildings(data);
+                addClusters(data);
+                enableOrDisableFields("get-grids", false);
             }
         })
         .catch(error => {
@@ -750,50 +612,6 @@
             background: background,
             color: '#FFFFFF',  // White text
             customClass: {popup: 'swal-toast'}
-        });
-    }
-
-    function getGrids(polygon) {
-        enableOrDisableFields("clear-clusters", true);
-        enableOrDisableFields("clear-oa", true);
-        let gridLength = document.getElementById("gridLength").value;
-        gridsDataExists = false
-        enableOrDisableFields("download-csv" ,!(gridsDataExists && clustersDataExists))
-        // Show fetching toast
-        showToast('Fetching Delivery Units...', 'info', undefined, '#ff9300');
-
-        fetch(`${hostUrl}/get_grids`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({polygon, gridLength})
-        })
-        .then(response => {
-            enableOrDisableFields("clear-clusters", false);
-            enableOrDisableFields("clear-oa", false);
-            return response.json()
-        })
-        .then(data => {
-            Swal.close();
-            // Close fetching toast and show success toast
-            if (data.error) {
-                showToast(`Error: ${data.error}`, 'error', 5000, '#FF0000', '300px');
-            } else {
-                showToast('Delivery Units loaded!', 'success', 2000, '#4CAF50');
-
-                densityLayer.clearLayers();
-                addGrids(data);
-                gridsDataExists = true
-                enableOrDisableFields("download-csv" ,!(gridsDataExists && clustersDataExists))
-            }
-        })
-        .catch(error => {
-            // Close fetching toast and show error toast
-            Swal.close();
-            showToast(`Error: ${error.message}`, 'error', 5000, '#FF0000', '300px');
-
-            console.error('Error:', error);
-            enableOrDisableFields("clear-clusters", false);
-            enableOrDisableFields("clear-oa", false);
         });
     }
 
