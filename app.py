@@ -28,7 +28,7 @@ try:
         opt_url='https://earthengine-highvolume.googleapis.com'
     )
     buildings = (ee.FeatureCollection("GOOGLE/Research/open-buildings/v3/polygons")
-                .filter(ee.Filter.gt('confidence', 0.7))
+                .filter(ee.Filter.gt('confidence', 0.8))
                 .filter(ee.Filter.gt('area_in_meters', 50)))
 except Exception as e:
     print(f"Error initializing Earth Engine: {e}")
@@ -117,8 +117,8 @@ def optimized_balanced_kmeans_constrained_with_buildings_count(buildingsGDF, coo
     n_samples = len(coords)
     num_clusters = math.ceil(n_samples / buildings_per_cluster)   # Integer division to determine clusters
     base_size = n_samples // num_clusters  # Base size for each cluster
-    min_size = int(base_size * (1 - balance_tolerance))
-    max_size = int(base_size * (1 + balance_tolerance))
+    min_size = base_size if num_clusters == 1 else int(base_size * (1 - balance_tolerance))
+    max_size = base_size if num_clusters == 1 else int(base_size * (1 + balance_tolerance))
 
     # Initialize Constrained K-means with exact size constraint
     constrained_kmeans = KMeansConstrained(
@@ -152,8 +152,8 @@ def optimized_balanced_kmeans_constrained_with_no_of_clusters(buildingsGDF, coor
     # Calculate ideal cluster size and bounds
     n_samples = len(coords)
     ideal_size = n_samples // num_clusters
-    min_size = int(ideal_size * (1 - balance_tolerance))
-    max_size = int(ideal_size * (1 + balance_tolerance))
+    min_size = ideal_size if num_clusters == 1 else int(ideal_size * (1 - balance_tolerance))
+    max_size = ideal_size if num_clusters == 1 else int(ideal_size * (1 + balance_tolerance))
 
     # Initialize Constrained K-means with size constraints
     constrained_kmeans = KMeansConstrained(
