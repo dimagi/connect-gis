@@ -477,7 +477,7 @@
                 style: function (feature) {
                     const clusterLabel = feature.properties.cluster_label; // Access updated label
                     return {
-                        color: getColorForNumber(clusterLabel), // Assign color based on cluster
+                        color: "black", // Assign color based on cluster
                         weight: 1,
                         fillOpacity: 0.9
                     };
@@ -534,8 +534,13 @@
                         const color = getColorForNumber(parseInt(clusterId)); // Assuming you have this function
 
                         // Add boundary layer
-                        const boundaryLayer = L.geoJSON(boundary, {color: color, fillOpacity: 0});
-                        boundaryLayer.bindPopup(`Cluster ${parseInt(clusterId, 10) + 1} \n Number of Buildings: ${numOfBuildings}`);
+                        const boundaryLayer = L.geoJSON(boundary, {color: color, fillOpacity: 0.5});
+
+                        boundaryLayer.bindTooltip(`Service Area ${clusterId} \n Number of Buildings: ${points.length}`, {
+                            sticky: true,
+                            direction: 'auto',
+                            opacity: 0.9
+                        });
                         clusterLayer.addLayer(boundaryLayer);
                     }
                 }
