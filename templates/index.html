@@ -358,7 +358,6 @@
         let gridAssignments = new Map();
         let gridsData = {};
         let drawnGrids = [];
-        let showGridDetails = false
         // Map Setup
         const map = L.map('map').setView([9.082, 8.6753], 6);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -545,7 +544,6 @@
             lastFetchedData = {};
             gridAssignments = new Map();
             gridsData = {};
-            showGridDetails = false
         }
 
         function addOrUpdatePolygon(layer) {
@@ -604,7 +602,6 @@
 
             densityLayer.clearLayers();
             drawnGrids = [];
-            showGridDetails = false
             const assignedBuildings = new Set();
             const allBuildings = turf.featureCollection(data.clusters.map(c => turf.point(c.coordinates)));
 
@@ -654,21 +651,15 @@
 
                 // Click event: Log grid-specific count if buildings exist, otherwise cluster total
                 if (gridBuildingsCount > 0) {
+                    drawnGrids.push(currentGrid);
+                    const gridIndex = drawnGrids.length + 1;
                     gridLayer.on('click', () => {
-                        console.log({
-                            clusterId: majorityCluster,
-                            noOfBuildings: buildingCount,
-                            gridNo: gridIndex + 1,
-                            gridBuildingsCount: gridBuildingsCount
-                        });
-                        showGridDetails = true
                         enableOrDisableHtmlAttribute('grid-details',false,'hidden')
-                        document.getElementById('grid-no').innerText = `Delivery Unit : ${gridIndex + 1}`;
+                        document.getElementById('grid-no').innerText = `Delivery Unit : ${gridIndex}`;
                         document.getElementById('cluster-no').innerText = `Service Area : ${majorityCluster}`;
                         document.getElementById('grid-buildings').innerText = `Buildings in the DUs: ${gridBuildingsCount}`;
                         document.getElementById('grid-color').innerHTML = `Service Area Color: <span class="color-box" style="background-color: ${getColorForNumber(majorityCluster)};"></span>`;
                     });
-                    drawnGrids.push(currentGrid);
                 }
 
                 densityLayer.addLayer(gridLayer);
