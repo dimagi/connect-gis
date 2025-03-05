@@ -808,10 +808,14 @@
             enableOrDisableFields("download-csv", !gridsDataExists);
             enableOrDisableFields("download-csv-commcare", !gridsDataExists);
 
-            const thresholdVal = document.getElementById("thresholdVal").value || 0.5;
+            let thresholdVal = document.getElementById("thresholdVal").value || 0.5;
+            if (thresholdVal > 100) thresholdVal = 100
+            if (thresholdVal <0) thresholdVal = 0
             const clusteringType = document.getElementById("clusteringType").value;
-            const noOfClusters = document.getElementById("noOfClusters").value;
-            const noOfBuildings = document.getElementById("noOfBuildings").value;
+            let noOfClusters = document.getElementById("noOfClusters").value;
+            if (noOfClusters <= 0) noOfClusters = 1;
+            let noOfBuildings = document.getElementById("noOfBuildings").value;
+            if (noOfBuildings <= 0) noOfBuildings = 1;
             const gridLength = document.getElementById("gridLength").value;
 
             showToast('Fetching data...', 'info', undefined, '#ff9300');
