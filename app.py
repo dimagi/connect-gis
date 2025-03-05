@@ -102,71 +102,72 @@ def add_grids_to_clusters(buildingsGDF, grid_size=15):
     return gpd.GeoDataFrame(pd.concat(grid_gdfs, ignore_index=True), crs=buildingsGDF.crs)
 
 
-def optimized_balanced_kmeans_constrained_with_buildings_count(buildingsGDF, coords, buildings_per_cluster, balance_tolerance=0.05):
-    """
-    Perform balanced K-means clustering with a fixed number of buildings per cluster.
+def _calculate_cluster_sizes(n_samples, num_clusters, balance_tolerance=0.05):
+    base_size = math.ceil(n_samples / num_clusters)
 
-    Parameters:
-    - coords: numpy array of coordinates (n_samples, 2)
-    - buildings_per_cluster: integer, number of buildings required in each cluster
+    if balance_tolerance == 0:
+        min_size = math.floor(n_samples / num_clusters)
+        max_size = base_size
+    else:
+        min_size = base_size if num_clusters == 1 else math.floor(base_size * (1 - balance_tolerance))
+        max_size = base_size if num_clusters == 1 else math.ceil(base_size * (1 + balance_tolerance))
 
-    Returns:
-    - GeoDataFrame with cluster labels
-    """
-    # Calculate number of samples and clusters
-    n_samples = len(coords)
-    num_clusters = math.ceil(n_samples / buildings_per_cluster)   # Integer division to determine clusters
-    base_size = math.ceil(n_samples / num_clusters)  # Base size for each cluster
-    min_size = base_size if num_clusters == 1 else math.floor(base_size * (1 - balance_tolerance))
-    max_size = base_size if num_clusters == 1 else math.ceil(base_size * (1 + balance_tolerance))
+    return base_size, min_size, max_size
 
-    # Initialize Constrained K-means with exact size constraint
+
+def _run_constrained_kmeans(coords, num_clusters, min_size, max_size):
     constrained_kmeans = KMeansConstrained(
         n_clusters=num_clusters,
-        size_min=min_size,  # Exact minimum size
-        size_max=max_size,  # Exact maximum size (forcing equality)
-        max_iter=300,  # Fixed max iterations
-        random_state=42,  # For reproducibility
-        n_init=1,  # Number of initializations (integer for compatibility with 0.7.5)
+        size_min=min_size,
+        size_max=max_size,
+        max_iter=300,
+        random_state=42,
+        n_init=1,
         n_jobs=1
     )
+    return constrained_kmeans.fit_predict(coords)
 
-    # Fit and predict cluster labels
-    labels = constrained_kmeans.fit_predict(coords)
-    return getClusters(buildingsGDF, coords, labels)
 
-def optimized_balanced_kmeans_constrained_with_no_of_clusters(buildingsGDF, coords, num_clusters=3, balance_tolerance=0.05):
+def optimized_balanced_kmeans_constrained_with_buildings_count(buildingsGDF, coords, buildings_per_cluster,
+                                                               balance_tolerance=0.05):
     """
-    Perform balanced K-means clustering with size constraints using minimum cost flow.
+    Perform balanced K-means clustering targeting a fixed number of buildings per cluster.
 
     Parameters:
     - buildingsGDF: GeoDataFrame containing building data
     - coords: numpy array of coordinates (n_samples, 2)
-    - num_clusters: number of clusters (default: 3)
-    - max_iter: maximum iterations for K-means (default: 300)
-    - balance_tolerance: tolerance for cluster size variation (default: 0.05)
+    - buildings_per_cluster: int, target number of buildings per cluster
+    - balance_tolerance: float, tolerance for cluster size variation (default: 0.05)
 
     Returns:
-    - buildingsGDF with cluster labels
+    - GeoDataFrame with cluster labels
     """
-    # Calculate ideal cluster size and bounds
     n_samples = len(coords)
-    ideal_size = math.ceil(n_samples / num_clusters)
-    min_size = ideal_size if num_clusters == 1 else math.floor(ideal_size * (1 - balance_tolerance))
-    max_size = ideal_size if num_clusters == 1 else math.ceil(ideal_size * (1 + balance_tolerance))
+    num_clusters = math.ceil(n_samples / buildings_per_cluster)
+    _, min_size, max_size = _calculate_cluster_sizes(n_samples, num_clusters, balance_tolerance)
 
-    # Initialize Constrained K-means with size constraints
-    constrained_kmeans = KMeansConstrained(
-        n_clusters=num_clusters,
-        size_min=min_size,  # Minimum number of points per cluster
-        size_max=max_size,  # Maximum number of points per cluster
-        max_iter=300,
-        random_state=42,
-        n_init=1  # Automatically choose number of initializations
-    )
+    labels = _run_constrained_kmeans(coords, num_clusters, min_size, max_size)
+    return getClusters(buildingsGDF, coords, labels)
 
-    # Fit and predict cluster labels
-    labels = constrained_kmeans.fit_predict(coords)
+
+def optimized_balanced_kmeans_constrained_with_no_of_clusters(buildingsGDF, coords, num_clusters=3,
+                                                              balance_tolerance=0.05):
+    """
+    Perform balanced K-means clustering with a specified number of clusters.
+
+    Parameters:
+    - buildingsGDF: GeoDataFrame containing building data
+    - coords: numpy array of coordinates (n_samples, 2)
+    - num_clusters: int, number of clusters (default: 3)
+    - balance_tolerance: float, tolerance for cluster size variation (default: 0.05)
+
+    Returns:
+    - GeoDataFrame with cluster labels
+    """
+    n_samples = len(coords)
+    _, min_size, max_size = _calculate_cluster_sizes(n_samples, num_clusters, balance_tolerance)
+
+    labels = _run_constrained_kmeans(coords, num_clusters, min_size, max_size)
     return getClusters(buildingsGDF, coords, labels)
 
 def balanced_kmeans(buildingsGDF, coords, num_clusters=3):
