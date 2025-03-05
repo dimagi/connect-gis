@@ -28,8 +28,9 @@ try:
         opt_url='https://earthengine-highvolume.googleapis.com'
     )
     buildings = (ee.FeatureCollection("GOOGLE/Research/open-buildings/v3/polygons")
-                .filter(ee.Filter.gt('confidence', 0.7))
-                .filter(ee.Filter.gt('area_in_meters', 50)))
+                # .filter(ee.Filter.gt('confidence', 0.7))
+                .filter(ee.Filter.gt('area_in_meters', 5))
+                )
 except Exception as e:
     print(f"Error initializing Earth Engine: {e}")
 
