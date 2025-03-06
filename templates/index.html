@@ -19,7 +19,10 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <style>
-        #map { height: 59vh; width: 100%; }
+        #map {
+            height: 59vh;
+            width: 100%;
+        }
 
         #title, #description {
             margin: 5px !important;
@@ -163,6 +166,7 @@
             font-size: 14px;
             transition: border-color 0.2s ease;
         }
+
         .input-group input[type="number"] {
             width: 94%;
         }
@@ -252,530 +256,767 @@
         #grid-color:hover .color-box {
             border-color: #333;
         }
+
+        .input-group select#neighbor-clusters {
+            width: auto;
+            margin-right: 10px;
+            max-width: 200px;
+        }
+
+        #reassign-cluster {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s ease, border-color 0.2s ease;
+        }
+
+        #reassign-cluster:hover {
+            background-color: #45a049;
+            border-color: #aaa;
+        }
+
+        #reassign-cluster:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            color: #000
+        }
+
     </style>
 </head>
 <body>
-    <h2 id="title">Building Density Clustering</h2>
+<h2 id="title">Building Density Clustering</h2>
 
-    <div id="container">
-        <div id="left-panel">
-            <div id="map"></div>
-            <br>
-            <div id="grid-details" hidden>
-                <div id="grid-details123">
-                    <h3>Delivery Unit Details</h3>
-                    <p id="grid-no">Grid No: None</p>
-                    <p id="cluster-no">Cluster No: None</p>
-                    <p id="grid-color">Cluster Color: <span class="color-box" style="background-color: transparent;"></span></p>
-                    <p id="grid-buildings">Buildings in the Grid: 0</p>
+<div id="container">
+    <div id="left-panel">
+        <div id="map"></div>
+        <br>
+        <div id="grid-details" hidden>
+            <h3>Delivery Unit Details</h3>
+            <p id="grid-no">Grid No: None</p>
+            <p id="cluster-no">Cluster No: None</p>
+            <p id="grid-color">Cluster Color: <span class="color-box" style="background-color: transparent;"></span>
+            </p>
+            <p id="grid-buildings">Buildings in the Grid: 0</p>
+            <div class="input-group">
+                <label for="neighbor-clusters">Reassign to Cluster:</label>
+                <select id="neighbor-clusters"></select>
+                <button id="reassign-cluster" onclick="reassignGridToCluster()">Reassign</button>
+            </div>
+        </div>
+    </div>
+    <div id="right-panel">
+        <!-- Block 1: CSV Upload/Download -->
+        <div class="panel-block">
+            <h3>CSV Operations</h3>
+            <div class="block-content">
+                <input type="text" id="csvDownload" onclick="downloadSampleCsv()">
+                <label for="csvDownload" class="csv-button">Download Sample CSV</label>
+                <input type="file" id="csvUpload" accept=".csv" onchange="uploadCSVPolygon()">
+                <label for="csvUpload" class="csv-button upload">Upload CSV</label>
+                <span id="uploaded-file-name">No File Chosen</span>
+            </div>
+        </div>
+
+        <!-- Block 2: Buildings and Cluster Details -->
+        <div class="panel-block">
+            <h3>Area Details</h3>
+            <div class="block-content">
+                <p id="info">Buildings in selected area: <span id="building-count">0</span></p>
+                <p id="clusterCount">Service Areas Created: <span id="cluster-count-val">0</span></p>
+            </div>
+        </div>
+
+        <!-- Block 3: Input Fields -->
+        <div class="panel-block">
+            <h3>Clustering Settings</h3>
+            <div class="block-content">
+                <div class="input-group">
+                    <label for="clusteringType">Select Service Area Grouping Method:</label>
+                    <select id="clusteringType" onchange="toggleInputFields()">
+                        <option value="kMeans">K-Means Clustering</option>
+                        <option value="balancedKMeans">Balanced K Means</option>
+                    </select>
+                </div>
+                <div id="noOfClustersIP" class="hidden input-group">
+                    <label for="noOfClusters">Number of Service Areas:</label>
+                    <input type="number" id="noOfClusters" min="1" value="3">
+                </div>
+                <div id="noOfBuildingsIP" class="hidden input-group">
+                    <label for="noOfBuildings">No of Buildings:</label>
+                    <input type="number" id="noOfBuildings" value="250">
+                </div>
+                <div id="thresholdValueIP" class="hidden input-group">
+                    <label for="thresholdVal">Tolerance Value as %:</label>
+                    <input type="number" id="thresholdVal" step="0.01" value="10" min="0" max="100">
+                </div>
+                <div id="gridLengthIP" class="input-group">
+                    <label for="gridLength">Delivery Unit Length in metres:</label>
+                    <input type="number" id="gridLength" step="0.01" value="50">
                 </div>
             </div>
         </div>
-        <div id="right-panel">
-            <!-- Block 1: CSV Upload/Download -->
-            <div class="panel-block">
-                <h3>CSV Operations</h3>
-                <div class="block-content">
-                    <input type="text" id="csvDownload" onclick="downloadSampleCsv()">
-                    <label for="csvDownload" class="csv-button">Download Sample CSV</label>
-                    <input type="file" id="csvUpload" accept=".csv" onchange="uploadCSVPolygon()">
-                    <label for="csvUpload" class="csv-button upload">Upload CSV</label>
-                    <span id="uploaded-file-name">No File Chosen</span>
-                </div>
-            </div>
 
-            <!-- Block 2: Buildings and Cluster Details -->
-            <div class="panel-block">
-                <h3>Area Details</h3>
-                <div class="block-content">
-                    <p id="info">Buildings in selected area: <span id="building-count">0</span></p>
-                    <p id="clusterCount">Service Areas Created: <span id="cluster-count-val">0</span></p>
-                </div>
-            </div>
-
-            <!-- Block 3: Input Fields -->
-            <div class="panel-block">
-                <h3>Clustering Settings</h3>
-                <div class="block-content">
-                    <div class="input-group">
-                        <label for="clusteringType">Select Service Area Grouping Method:</label>
-                        <select id="clusteringType" onchange="toggleInputFields()">
-                            <option value="kMeans">K-Means Clustering</option>
-                            <option value="balancedKMeans">Balanced K Means</option>
-                        </select>
-                    </div>
-                    <div id="noOfClustersIP" class="hidden input-group">
-                        <label for="noOfClusters">Number of Service Areas:</label>
-                        <input type="number" id="noOfClusters" min="1" value="3">
-                    </div>
-                    <div id="noOfBuildingsIP" class="hidden input-group">
-                        <label for="noOfBuildings">No of Buildings:</label>
-                        <input type="number" id="noOfBuildings" value="250">
-                    </div>
-                    <div id="thresholdValueIP" class="hidden input-group">
-                        <label for="thresholdVal">Tolerance Value as %:</label>
-                        <input type="number" id="thresholdVal" step="0.01" value="10" min="0" max="100">
-                    </div>
-                    <div id="gridLengthIP" class="input-group">
-                        <label for="gridLength">Delivery Unit Length in metres:</label>
-                        <input type="number" id="gridLength" step="0.01" value="50">
-                    </div>
-                </div>
-            </div>
-
-            <!-- Block 4: Action Buttons -->
         <!-- Block 4: Action Buttons -->
         <div class="panel-block">
             <h3>Actions</h3>
             <div class="block-content">
                 <div class="button-row">
-                    <button onclick="fetchData(oaLangLats, false)" id="run-clustering" disabled>Get Service Areas</button>
+                    <button onclick="fetchData(oaLangLats, false)" id="run-clustering" disabled>Get Service Areas
+                    </button>
                     <button onclick="clearClusters()" id="clear-clusters" disabled>Clear Service Areas</button>
                 </div>
                 <div class="button-row">
                     <button onclick="drawGrids(lastFetchedData)" id="get-grids" disabled>Get Delivery Units</button>
-                    <button onclick="clearGrids(); addClusters(lastFetchedData, true)" id="clear-grids" disabled>Clear Delivery Units</button>
+                    <button onclick="clearGrids(); addClusters(lastFetchedData, true)" id="clear-grids" disabled>Clear
+                        Delivery Units
+                    </button>
                 </div>
                 <div class="button-row">
                     <button onclick="clearOA()" id="clear-oa" disabled class="full-width">Clear Map</button>
                 </div>
                 <div class="button-row">
-                    <button onclick="downloadGmapData(gridsData)" id="download-csv" disabled>Download CSV For My Maps</button>
-                    <button onclick="downloadCsvForCommCare(gridsData, gridAssignments)" id="download-csv-commcare" disabled>Download CSV For CommCare</button>
+                    <button onclick="downloadGmapData(gridsData)" id="download-csv" disabled>Download CSV For My Maps
+                    </button>
+                    <button onclick="downloadCsvForCommCare(gridsData, gridAssignments)" id="download-csv-commcare"
+                            disabled>Download CSV For CommCare
+                    </button>
                 </div>
             </div>
         </div>
-        </div>
     </div>
-    <script>
-        // Constants and Global Variables
-        const hostUrl = "https://map-clustering.onrender.com";
-        // const hostUrl = "http://localhost:5000";
-        let oaLangLats = [];
-        let clustersDataExists = false;
-        let gridsDataExists = false;
-        let lastFetchedData = {};
-        let gridAssignments = new Map();
-        let gridsData = {};
-        let drawnGrids = [];
-        let processedData = {
+</div>
+<script>
+    // Constants and Global Variables
+    let hostUrl = "https://map-clustering.onrender.com";
+    // hostUrl = "http://localhost:5000";
+    let oaLangLats = [];
+    let clustersDataExists = false;
+    let gridsDataExists = false;
+    let lastFetchedData = {};
+    let gridAssignments = new Map();
+    let gridsData = {};
+    let drawnGrids = [];
+    let processedData = {
+        clusters: [],
+        grids: [],
+        buildings: []
+    };
+    let selectedGridIndex = null; // Store the index of the currently selected grid
+    // Map Setup
+    const map = L.map('map').setView([9.082, 8.6753], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    const drawnItems = new L.FeatureGroup().addTo(map);
+    const drawControl = new L.Control.Draw({
+        draw: {polygon: true, rectangle: true, polyline: false, circle: false, marker: false},
+        edit: {featureGroup: drawnItems}
+    }).addTo(map);
+
+    const buildingsLayer = L.geoJSON(null, {
+        style: () => ({color: "black", weight: 1, fillOpacity: 0.9})
+    }).addTo(map);
+
+    const clusterLayer = L.featureGroup().addTo(map);
+    const densityLayer = L.geoJSON(null).addTo(map);
+
+    // Wards and Facilities Setup
+    const wardsIndex = new RBush();
+    const facilitiesIndex = new RBush();
+    let wardsLayer = null, healthFacilitiesLayer = null;
+    let loadedWardsBounds = null, loadedHealthBounds = null;
+
+    Promise.all([
+        fetch('/static/nigeria_ward.geojson').then(r => r.json()),
+        fetch('/static/nigeria_health_facilities.geojson').then(r => r.json())
+    ]).then(([wardsData, facilitiesData]) => {
+        setupIndex(wardsData, wardsIndex, 'polygon');
+        setupIndex(facilitiesData, facilitiesIndex, 'point');
+        updateMapLayers();
+    });
+
+    const updateMapLayers = debounce(() => {
+        updateWards();
+        updateHealthFacilities();
+    }, 200);
+    map.on('zoomend moveend', updateMapLayers);
+
+    // Draw Events
+    let isDrawing = false;
+    map.on(L.Draw.Event.DRAWSTART, () => {
+        isDrawing = true;
+    });
+    map.on(L.Draw.Event.CREATED, (event) => addOrUpdatePolygon(event.layer));
+    map.on(L.Draw.Event.EDITED, (event) => event.layers.eachLayer(layer => addOrUpdatePolygon(layer)));
+
+    // Utility Functions
+    function showToast(title, icon, timer, background, width = '250px') {
+        Swal.fire({
+            toast: true,
+            position: 'bottom-start',
+            title,
+            icon,
+            showConfirmButton: false,
+            timer,
+            width,
+            padding: '5px',
+            background,
+            color: '#FFFFFF',
+            customClass: {popup: 'swal-toast'}
+        });
+    }
+
+    function getColorForNumber(num) {
+        const hue = (num * 137) % 360;
+        return `hsl(${hue}, 90%, 50%)`;
+    }
+
+    function enableOrDisableHtmlAttribute(field, value, attribute = 'disabled') {
+        document.getElementById(field)[attribute] = value;
+    }
+
+
+    function toggleInputFields() {
+        const method = document.getElementById("clusteringType").value;
+        document.getElementById("noOfClustersIP").style.display = method === "kMeans" ? "block" : "none";
+        document.getElementById("thresholdValueIP").style.display = ["kMeans", "balancedKMeans"].includes(method) ? "block" : "none";
+        document.getElementById("noOfBuildingsIP").style.display = ["balancedKMeans"].includes(method) ? "block" : "none";
+    }
+
+    // Map Data Functions
+    function setupIndex(data, index, type) {
+        index.load(data.features.map(f => {
+            const coords = f.geometry.coordinates;
+            const [minLng, minLat, maxLng, maxLat] = type === 'point'
+                    ? [coords[0], coords[1], coords[0], coords[1]]
+                    : turf.bbox(f);
+            return {minX: minLng, minY: minLat, maxX: maxLng, maxY: maxLat, feature: f};
+        }));
+    }
+
+    function updateWards() {
+        const zoom = map.getZoom();
+        if (zoom <= 10) {
+            wardsLayer?.clearLayers();
+            loadedWardsBounds = null;
+            return;
+        }
+
+        const bounds = map.getBounds();
+        if (loadedWardsBounds && loadedWardsBounds.contains(bounds)) return;
+
+        const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
+        const visible = wardsIndex.search({minX: bbox[0], minY: bbox[1], maxX: bbox[2], maxY: bbox[3]})
+                .map(item => item.feature);
+
+        if (!wardsLayer) {
+            wardsLayer = L.geoJson(null, {
+                style: {color: "black", weight: 1, fillOpacity: 0, dashArray: "4,4"},
+                interactive: false,
+                onEachFeature: (feature, layer) => layer.bindPopup(feature.properties.ward_name)
+            }).addTo(map);
+        }
+        wardsLayer.clearLayers().addData({type: "FeatureCollection", features: visible});
+        loadedWardsBounds = bounds;
+    }
+
+    function updateHealthFacilities() {
+        const zoom = map.getZoom();
+        if (zoom <= 11) {
+            healthFacilitiesLayer?.clearLayers();
+            loadedHealthBounds = null;
+            return;
+        }
+
+        const bounds = map.getBounds();
+        if (loadedHealthBounds && loadedHealthBounds.contains(bounds)) return;
+
+        const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
+        const visible = facilitiesIndex.search({minX: bbox[0], minY: bbox[1], maxX: bbox[2], maxY: bbox[3]})
+                .map(item => item.feature);
+
+        if (!healthFacilitiesLayer) {
+            healthFacilitiesLayer = L.markerClusterGroup({maxClusterRadius: 40}).addTo(map);
+        }
+        healthFacilitiesLayer.clearLayers().addLayers(visible.map(f =>
+                L.marker([f.geometry.coordinates[1], f.geometry.coordinates[0]])
+                        .bindPopup(`<b>${f.properties.name}</b><br>Ward: ${f.properties.ward_name}`)
+        ));
+
+        loadedHealthBounds = bounds;
+    }
+
+    function debounce(func, wait) {
+        let timeout;
+        return function (...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+
+    // Map Operation Functions
+    function clearOA() {
+        oaLangLats = [];
+        drawnItems.clearLayers();
+        enableOrDisableHtmlAttribute("run-clustering", true);
+        enableOrDisableHtmlAttribute("get-grids", true);
+        clearClusters();
+        enableOrDisableHtmlAttribute("clear-oa", true);
+        document.getElementById("uploaded-file-name").innerText = 'No File Chosen';
+    }
+
+    function clearClusters() {
+        buildingsLayer.clearLayers();
+        clusterLayer.clearLayers();
+        document.getElementById('cluster-count-val').innerText = 0;
+        resetFields();
+        enableOrDisableHtmlAttribute("clear-clusters", true);
+        enableOrDisableHtmlAttribute("get-grids", true);
+        clearGrids();
+    }
+
+    function clearGrids() {
+        gridsDataExists = false;
+        densityLayer.clearLayers();
+        enableOrDisableHtmlAttribute("clear-grids", true);
+        enableOrDisableHtmlAttribute("download-csv", !gridsDataExists);
+        enableOrDisableHtmlAttribute("download-csv-commcare", !gridsDataExists);
+        enableOrDisableHtmlAttribute('grid-details', true, 'hidden')
+        processedData = {clusters: [], grids: [], buildings: []};
+    }
+
+    function resetFields() {
+        gridsDataExists = false;
+        lastFetchedData = {};
+        gridAssignments = new Map();
+        gridsData = {};
+        processedData = {
             clusters: [],
             grids: [],
             buildings: []
-        };
-        // Map Setup
-        const map = L.map('map').setView([9.082, 8.6753], 6);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenStreetMap contributors'
-        }).addTo(map);
-
-        const drawnItems = new L.FeatureGroup().addTo(map);
-        const drawControl = new L.Control.Draw({
-            draw: { polygon: true, rectangle: true, polyline: false, circle: false, marker: false },
-            edit: { featureGroup: drawnItems }
-        }).addTo(map);
-
-        const buildingsLayer = L.geoJSON(null, {
-            style: () => ({ color: "black", weight: 1, fillOpacity: 0.9 })
-        }).addTo(map);
-
-        const clusterLayer = L.featureGroup().addTo(map);
-        const densityLayer = L.geoJSON(null).addTo(map);
-
-        // Wards and Facilities Setup
-        const wardsIndex = new RBush();
-        const facilitiesIndex = new RBush();
-        let wardsLayer = null, healthFacilitiesLayer = null;
-        let loadedWardsBounds = null, loadedHealthBounds = null;
-
-        Promise.all([
-            fetch('/static/nigeria_ward.geojson').then(r => r.json()),
-            fetch('/static/nigeria_health_facilities.geojson').then(r => r.json())
-        ]).then(([wardsData, facilitiesData]) => {
-            setupIndex(wardsData, wardsIndex, 'polygon');
-            setupIndex(facilitiesData, facilitiesIndex, 'point');
-            updateMapLayers();
-        });
-
-        const updateMapLayers = debounce(() => {
-            updateWards();
-            updateHealthFacilities();
-        }, 200);
-        map.on('zoomend moveend', updateMapLayers);
-
-        // Draw Events
-        let isDrawing = false;
-        map.on(L.Draw.Event.DRAWSTART, () => { isDrawing = true; });
-        map.on(L.Draw.Event.CREATED, (event) => addOrUpdatePolygon(event.layer));
-        map.on(L.Draw.Event.EDITED, (event) => event.layers.eachLayer(layer => addOrUpdatePolygon(layer)));
-
-        // Utility Functions
-        function showToast(title, icon, timer, background, width = '250px') {
-            Swal.fire({
-                toast: true,
-                position: 'bottom-start',
-                title,
-                icon,
-                showConfirmButton: false,
-                timer,
-                width,
-                padding: '5px',
-                background,
-                color: '#FFFFFF',
-                customClass: { popup: 'swal-toast' }
-            });
         }
+    }
 
-        function getColorForNumber(num) {
-            const hue = (num * 137) % 360;
-            return `hsl(${hue}, 90%, 50%)`;
-        }
+    function addOrUpdatePolygon(layer) {
+        clearOA();
+        isDrawing = false;
 
-        function enableOrDisableHtmlAttribute(field, value, attribute = 'disabled') {
-            document.getElementById(field)[attribute] = value;
-        }
+        const latlngs = layer.getLatLngs()[0].map(coord => [coord.lat, coord.lng]);
+        latlngs.push(latlngs[0]); // Close the loop
 
+        const polygonLayer = L.polygon(latlngs, {color: 'blue', weight: 1, fillOpacity: 0}).addTo(drawnItems);
+        map.fitBounds(polygonLayer.getBounds());
+        oaLangLats = layer.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);
+        enableOrDisableHtmlAttribute("run-clustering", false);
+        enableOrDisableHtmlAttribute("clear-oa", false);
+    }
 
-        function toggleInputFields() {
-            const method = document.getElementById("clusteringType").value;
-            document.getElementById("noOfClustersIP").style.display = method === "kMeans" ? "block" : "none";
-            document.getElementById("thresholdValueIP").style.display = ["kMeans", "balancedKMeans"].includes(method) ? "block" : "none";
-            document.getElementById("noOfBuildingsIP").style.display = ["balancedKMeans"].includes(method) ? "block" : "none";
-        }
+    function addBuildings(data) {
+        buildingsLayer.clearLayers();
+        if (!data.buildings) return;
 
-        // Map Data Functions
-        function setupIndex(data, index, type) {
-            index.load(data.features.map(f => {
-                const coords = f.geometry.coordinates;
-                const [minLng, minLat, maxLng, maxLat] = type === 'point'
-                    ? [coords[0], coords[1], coords[0], coords[1]]
-                    : turf.bbox(f);
-                return { minX: minLng, minY: minLat, maxX: maxLng, maxY: maxLat, feature: f };
-            }));
-        }
+        L.geoJSON(data.buildings, {
+            style: (feature) => ({
+                color: "black",
+                weight: 1,
+                fillColor: getColorForNumber(feature.properties.cluster_label),
+                fillOpacity: 0.9
+            }),
+        }).addTo(buildingsLayer);
+    }
 
-        function updateWards() {
-            const zoom = map.getZoom();
-            if (zoom <= 10) {
-                wardsLayer?.clearLayers();
-                loadedWardsBounds = null;
-                return;
-            }
+    function addClusters(data, interactive) {
+        clusterLayer.clearLayers();
+        if (!data.clusters) return;
 
-            const bounds = map.getBounds();
-            if (loadedWardsBounds && loadedWardsBounds.contains(bounds)) return;
+        const clusterGroups = groupClusters(data.clusters);
+        let noOfClusters = 0;
+        const clusters = Object.entries(clusterGroups).filter(([_, {points}]) => points.length > 2);
 
-            const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
-            const visible = wardsIndex.search({ minX: bbox[0], minY: bbox[1], maxX: bbox[2], maxY: bbox[3] })
-                .map(item => item.feature);
-
-            if (!wardsLayer) {
-                wardsLayer = L.geoJson(null, {
-                    style: { color: "black", weight: 1, fillOpacity: 0, dashArray: "4,4" },
-                    interactive: false,
-                    onEachFeature: (feature, layer) => layer.bindPopup(feature.properties.ward_name)
-                }).addTo(map);
-            }
-            wardsLayer.clearLayers().addData({ type: "FeatureCollection", features: visible });
-            loadedWardsBounds = bounds;
-        }
-
-        function updateHealthFacilities() {
-            const zoom = map.getZoom();
-            if (zoom <= 11) {
-                healthFacilitiesLayer?.clearLayers();
-                loadedHealthBounds = null;
-                return;
-            }
-
-            const bounds = map.getBounds();
-            if (loadedHealthBounds && loadedHealthBounds.contains(bounds)) return;
-
-            const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
-            const visible = facilitiesIndex.search({ minX: bbox[0], minY: bbox[1], maxX: bbox[2], maxY: bbox[3] })
-                .map(item => item.feature);
-
-            if (!healthFacilitiesLayer) {
-                healthFacilitiesLayer = L.markerClusterGroup({ maxClusterRadius: 40 }).addTo(map);
-            }
-            healthFacilitiesLayer.clearLayers().addLayers(visible.map(f =>
-                L.marker([f.geometry.coordinates[1], f.geometry.coordinates[0]])
-                    .bindPopup(`<b>${f.properties.name}</b><br>Ward: ${f.properties.ward_name}`)
-            ));
-
-            loadedHealthBounds = bounds;
-        }
-
-        function debounce(func, wait) {
-            let timeout;
-            return function (...args) {
-                clearTimeout(timeout);
-                timeout = setTimeout(() => func.apply(this, args), wait);
-            };
-        }
-
-        // Map Operation Functions
-        function clearOA() {
-            oaLangLats = [];
-            drawnItems.clearLayers();
-            enableOrDisableHtmlAttribute("run-clustering", true);
-            enableOrDisableHtmlAttribute("get-grids", true);
-            clearClusters();
-            enableOrDisableHtmlAttribute("clear-oa", true);
-            document.getElementById("uploaded-file-name").innerText = 'No File Chosen';
-        }
-
-        function clearClusters() {
-            buildingsLayer.clearLayers();
-            clusterLayer.clearLayers();
-            document.getElementById('cluster-count-val').innerText = 0;
-            resetFields();
-            enableOrDisableHtmlAttribute("clear-clusters", true);
-            enableOrDisableHtmlAttribute("get-grids", true);
-            clearGrids();
-        }
-
-        function clearGrids() {
-            gridsDataExists = false;
-            densityLayer.clearLayers();
-            enableOrDisableHtmlAttribute("clear-grids", true);
-            enableOrDisableHtmlAttribute("download-csv", !gridsDataExists);
-            enableOrDisableHtmlAttribute("download-csv-commcare", !gridsDataExists);
-            enableOrDisableHtmlAttribute('grid-details',true,'hidden')
-            processedData = { clusters: [], grids: [], buildings: [] };
-        }
-
-        function resetFields() {
-            gridsDataExists = false;
-            lastFetchedData = {};
-            gridAssignments = new Map();
-            gridsData = {};
-            processedData = {
-                clusters: [],
-                grids: [],
-                buildings: []
-            }
-        }
-
-        function addOrUpdatePolygon(layer) {
-            clearOA();
-            isDrawing = false;
-
-            const latlngs = layer.getLatLngs()[0].map(coord => [coord.lat, coord.lng]);
-            latlngs.push(latlngs[0]); // Close the loop
-
-            const polygonLayer = L.polygon(latlngs, { color: 'blue', weight: 1, fillOpacity: 0 }).addTo(drawnItems);
-            map.fitBounds(polygonLayer.getBounds());
-            oaLangLats = layer.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);
-            enableOrDisableHtmlAttribute("run-clustering", false);
-            enableOrDisableHtmlAttribute("clear-oa", false);
-        }
-
-        function addBuildings(data) {
-            buildingsLayer.clearLayers();
-            if (!data.buildings) return;
-
-            L.geoJSON(data.buildings, {
-                style: () => ({ color: "black", weight: 1, fillOpacity: 0.9 })
-            }).addTo(buildingsLayer);
-        }
-
-        function addClusters(data, interactive) {
-            clusterLayer.clearLayers();
-            if (!data.clusters) return;
-
-            const clusterGroups = groupClusters(data.clusters);
-            let noOfClusters = 0;
-            const clusters = Object.entries(clusterGroups).filter(([_, { points }]) => points.length > 2);
-
-            clusters.forEach(([clusterId, { points, numOfBuildings }]) => {
-                const boundary = turf.convex(turf.featureCollection(points.map(p => turf.point(p))));
-                if (boundary) {
-                    const color = getColorForNumber(parseInt(clusterId));
-                    const boundaryLayer = L.geoJSON(boundary, { color, fillOpacity: 0.5, interactive: interactive });
-                    boundaryLayer.bindTooltip(`Service Area ${clusterId} \n Number of Buildings: ${points.length}`, {
-                        sticky: true,
-                        direction: 'auto',
-                        opacity: 0.9
-                    });
-                    console.log('asdfafsd')
-                    clusterLayer.addLayer(boundaryLayer);
-                    noOfClusters++;
-                }
-            });
-
-            document.getElementById('cluster-count-val').innerText = noOfClusters;
-        }
-
-        function drawGrids(lastFetchedData) {
-            data = JSON.parse(JSON.stringify(lastFetchedData));
-            if (!data?.clusters || !data?.buildings) return null;
-            enableOrDisableHtmlAttribute('grid-details', true, 'hidden');
-            // Reset global state
-            densityLayer.clearLayers();
-            drawnGrids = [];
-            processedData = { clusters: [], grids: [], buildings: [] }; // Reset processedData
-            const assignedBuildings = new Set();
-            const allBuildings = turf.featureCollection(data.clusters.map(c => turf.point(c.coordinates)));
-
-            const clusterGroups = groupClusters(data.clusters);
-            const boundaries = computeBoundaries(clusterGroups);
-
-            const bbox = getExpandedBbox(allBuildings, 0.005);
-            const gridSizeDeg = (parseInt(document.getElementById("gridLength").value) || 50) / 111000;
-            const grid = turf.squareGrid(bbox, gridSizeDeg, { units: 'degrees' });
-
-            const assignedBuildingIndices = new Set();
-            turf.featureEach(grid, (currentGrid, gridIndex) => {
-                const buildingsInGrid = getBuildingsInGrid(allBuildings, currentGrid, assignedBuildingIndices);
-                const majorityCluster = findMajorityCluster(currentGrid, boundaries);
-                if (!majorityCluster) return;
-
-                gridAssignments.set(gridIndex, { clusterId: majorityCluster });
-                currentGrid.cluster = majorityCluster;
-                const hasBuildings = buildingsInGrid.features.length > 0;
-                const gridBuildingsCount = buildingsInGrid.features.length;
-
-                if (hasBuildings) {
-                    reassignAndDrawBuildings(buildingsInGrid, majorityCluster, data, assignedBuildings);
-                }
-
-                const color = getColorForNumber(parseInt(majorityCluster));
-                const gridLayer = L.geoJSON(currentGrid, {
-                    style: {
-                        color: "black",
-                        weight: hasBuildings ? 1 : 0,
-                        fillOpacity: hasBuildings ? 0 : 0,
-                        opacity: hasBuildings ? 1 : 0
-                    }
-                });
-
-                const buildingCount = clusterGroups[majorityCluster].points.length;
-                gridLayer.bindTooltip(`Service Area ${majorityCluster} \n Number of Buildings: ${buildingCount}`, {
+        clusters.forEach(([clusterId, {points, numOfBuildings}]) => {
+            const boundary = turf.convex(turf.featureCollection(points.map(p => turf.point(p))));
+            if (boundary) {
+                const color = getColorForNumber(parseInt(clusterId));
+                const boundaryLayer = L.geoJSON(boundary, {color, fillOpacity: 0.5, interactive: interactive});
+                boundaryLayer.bindTooltip(`Service Area ${clusterId} \n Number of Buildings: ${points.length}`, {
                     sticky: true,
                     direction: 'auto',
                     opacity: 0.9
                 });
+                console.log('asdfafsd')
+                clusterLayer.addLayer(boundaryLayer);
+                noOfClusters++;
+            }
+        });
 
-                if (gridBuildingsCount > 0) {
-                    currentGrid.buildingCount = gridBuildingsCount;
-                    const gridIndex = drawnGrids.length + 1;
-                    drawnGrids.push(currentGrid);
+        document.getElementById('cluster-count-val').innerText = noOfClusters;
+    }
 
-                    // Compute grid WKT and store minimal data
-                    const geometry = currentGrid.geometry;
-                    const coords = geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
-                    const wkt = `POLYGON ((${coords}, ${geometry.coordinates[0][0][0]} ${geometry.coordinates[0][0][1]}))`;
+    function drawGrids(lastFetchedData) {
+        data = JSON.parse(JSON.stringify(lastFetchedData));
+        if (!data?.clusters || !data?.buildings) return null;
 
-                    // Store only what's needed for CSVs
-                    processedData.grids.push({
-                        gridWKT: wkt,
-                        clusterId: majorityCluster,
-                        buildingCount: gridBuildingsCount,
-                        geoJSON: currentGrid // Store the GeoJSON for later metric computation
+        // Reset global state
+        densityLayer.clearLayers();
+        drawnGrids = [];
+        processedData = {clusters: [], grids: [], buildings: []};
+        const assignedBuildings = new Set();
+        const allBuildings = turf.featureCollection(data.clusters.map(c => turf.point(c.coordinates)));
+
+        // Compute initial boundaries for neighbor detection
+        let clusterGroups = groupClusters(data.clusters);
+        const boundaries = computeBoundaries(clusterGroups);
+
+        const bbox = getExpandedBbox(allBuildings, 0.005);
+        const gridSizeDeg = (parseInt(document.getElementById("gridLength").value) || 50) / 111000;
+        const grid = turf.squareGrid(bbox, gridSizeDeg, {units: 'degrees'});
+
+        const assignedBuildingIndices = new Set();
+        turf.featureEach(grid, (currentGrid, gridIndex) => {
+            const buildingsInGrid = getBuildingsInGrid(allBuildings, currentGrid, assignedBuildingIndices);
+            const majorityCluster = findMajorityCluster(currentGrid, boundaries);
+            if (!majorityCluster) return;
+
+            gridAssignments.set(gridIndex, {clusterId: majorityCluster});
+            currentGrid.cluster = majorityCluster;
+            const hasBuildings = buildingsInGrid.features.length > 0;
+            const gridBuildingsCount = buildingsInGrid.features.length;
+
+            if (hasBuildings) {
+                reassignAndDrawBuildings(buildingsInGrid, majorityCluster, data, assignedBuildings);
+            }
+
+            const color = getColorForNumber(parseInt(majorityCluster));
+            const gridLayer = L.geoJSON(currentGrid, {
+                style: {
+                    color: "black",
+                    weight: hasBuildings ? 1 : 0,
+                    fillOpacity: 0,
+                    opacity: hasBuildings ? 1 : 0
+                }
+            });
+
+            // Dynamically fetch building count from processedData.clusters
+            gridLayer.bindTooltip(() => {
+                return `Service Area ${currentGrid.cluster} \n Number of Buildings: ${processedData.clusters.find(c => parseInt(c.clusterId) === parseInt(currentGrid.cluster)).buildingCount}`;
+            }, {
+                sticky: true,
+                direction: 'auto',
+                opacity: 0.9
+            });
+
+            if (gridBuildingsCount > 0) {
+                currentGrid.buildingCount = gridBuildingsCount;
+                const gridIndex = drawnGrids.length + 1;
+                drawnGrids.push({grid: currentGrid, layer: gridLayer});
+
+                const geometry = currentGrid.geometry;
+                const coords = geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
+                const wkt = `POLYGON ((${coords}, ${geometry.coordinates[0][0][0]} ${geometry.coordinates[0][0][1]}))`;
+
+                processedData.grids.push({
+                    gridWKT: wkt,
+                    clusterId: majorityCluster,
+                    buildingCount: gridBuildingsCount,
+                    geoJSON: currentGrid
+                });
+
+                gridLayer.on('click', () => {
+                    enableOrDisableHtmlAttribute('grid-details', false, 'hidden');
+                    selectedGridIndex = gridIndex - 1;
+                    const currentGridData = drawnGrids[selectedGridIndex].grid;
+                    const currentCluster = currentGridData.cluster;
+                    const currentBuildingCount = currentGridData.buildingCount;
+                    document.getElementById('grid-no').innerText = `Delivery Unit: ${gridIndex}`;
+                    document.getElementById('cluster-no').innerText = `Service Area: ${currentCluster}`;
+                    document.getElementById('grid-buildings').innerText = `Buildings in the DUs: ${currentBuildingCount}`;
+                    document.getElementById('grid-color').innerHTML = `Service Area Color: <span class="color-box" style="background-color: ${getColorForNumber(currentCluster)};"></span>`;
+
+                    // Recompute clusterGroups and boundaries for neighbor detection
+                    setGridNeigboursInDropdown(currentCluster, currentGrid, groupClusters(data.clusters))
+                    enableOrDisableHtmlAttribute('draw-grids',false,'hidden')
+                });
+
+            }
+            densityLayer.addLayer(gridLayer);
+        });
+
+        // Compute cluster boundaries and building counts dynamically
+        clusterGroups = groupClusters(data.clusters); // Recompute clusterGroups
+        clusterLayer.clearLayers();
+        let noOfClusters = 0;
+        processedData.clusters = []; // Reset processedData.clusters
+
+        Object.entries(clusterGroups).forEach(([clusterId, {points}]) => {
+            if (points.length > 2) {
+                const boundary = turf.convex(turf.featureCollection(points.map(p => turf.point(p))));
+                if (boundary) {
+                    const color = getColorForNumber(parseInt(clusterId));
+                    const boundaryLayer = L.geoJSON(boundary, {
+                        color,
+                        fillOpacity: 0.5,
+                        interactive: false
                     });
+                    boundaryLayer.bindTooltip(() => {
+                        return `Service Area ${clusterId} \n Number of Buildings: ${processedData.clusters.find(c => parseInt(c.clusterId) === parseInt(clusterId)).buildingCount}`;
+                    }, {
+                        sticky: true,
+                        direction: 'auto',
+                        opacity: 0.9
+                    });
+                    clusterLayer.addLayer(boundaryLayer);
+                    noOfClusters++;
 
-                    gridLayer.on('click', () => {
-                        enableOrDisableHtmlAttribute('grid-details', false, 'hidden');
-                        document.getElementById('grid-no').innerText = `Delivery Unit: ${gridIndex}`;
-                        document.getElementById('cluster-no').innerText = `Service Area: ${majorityCluster}`;
-                        document.getElementById('grid-buildings').innerText = `Buildings in the DUs: ${gridBuildingsCount}`;
-                        document.getElementById('grid-color').innerHTML = `Service Area Color: <span class="color-box" style="background-color: ${getColorForNumber(majorityCluster)};"></span>`;
+                    const coords = boundary.geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
+                    const wkt = `POLYGON ((${coords}, ${boundary.geometry.coordinates[0][0][0]} ${boundary.geometry.coordinates[0][0][1]}))`;
+                    processedData.clusters.push({
+                        clusterId,
+                        boundaryWKT: wkt,
+                        buildingCount: points.length
                     });
                 }
+            }
+        });
+        document.getElementById('cluster-count-val').innerText = noOfClusters;
 
-                densityLayer.addLayer(gridLayer);
-            });
+        // // Store building details in processedData
+        data.buildings.features.forEach((feature, index) => {
+            const geometry = feature.geometry;
+            if (geometry && geometry.type === "Polygon" && Array.isArray(geometry.coordinates)) {
+                const coords = geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
+                const wkt = `POLYGON ((${coords}, ${geometry.coordinates[0][0][0]} ${geometry.coordinates[0][0][1]}))`;
+                const clusterLabel = data.clusters[index]?.cluster ?? "Unassigned";
+                processedData.buildings.push({
+                    buildingWKT: wkt,
+                    clusterId: clusterLabel
+                });
+            }
+        });
 
-            // Compute and store cluster boundaries
-            clusterLayer.clearLayers();
-            let noOfClusters = 0;
-            Object.entries(clusterGroups).forEach(([clusterId, { points }]) => {
-                if (points.length > 2) {
-                    const boundary = turf.convex(turf.featureCollection(points.map(p => turf.point(p))));
-                    if (boundary) {
-                        const color = getColorForNumber(parseInt(clusterId));
-                        const boundaryLayer = L.geoJSON(boundary, {
-                            color,
-                            fillOpacity: 0.5,
-                            interactive: false
-                        });
-                        boundaryLayer.bindTooltip(`Service Area ${clusterId} \n Number of Buildings: ${points.length}`, {
-                            sticky: true,
-                            direction: 'auto',
-                            opacity: 0.9
-                        });
-                        clusterLayer.addLayer(boundaryLayer);
-                        noOfClusters++;
+        gridsData = data;
+        gridsDataExists = true;
+        enableOrDisableHtmlAttribute("clear-grids", false);
+        enableOrDisableHtmlAttribute("download-csv", !gridsDataExists);
+        enableOrDisableHtmlAttribute("download-csv-commcare", !gridsDataExists);
+    }
 
-                        const coords = boundary.geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
-                        const wkt = `POLYGON ((${coords}, ${boundary.geometry.coordinates[0][0][0]} ${boundary.geometry.coordinates[0][0][1]}))`;
-                        processedData.clusters.push({
-                            clusterId,
-                            boundaryWKT: wkt,
-                            buildingCount: points.length
-                        });
-                    }
+    function reassignGridToCluster() {
+        if (selectedGridIndex === null) {
+            showToast("No grid selected for reassignment.", "warning", 3000, "#FFA500");
+            return;
+        }
+
+        const newClusterId = parseInt(document.getElementById('neighbor-clusters').value);
+        const gridData = drawnGrids[selectedGridIndex];
+        const grid = gridData.grid;
+        const gridLayer = gridData.layer;
+        const oldClusterId = parseInt(grid.cluster);
+
+        if (newClusterId === oldClusterId) {
+            showToast("Grid is already assigned to this cluster.", "info", 2000, "#ff9300");
+            return;
+        }
+
+        // Debug: Log building counts before reassignment
+        const oldClusterBefore = processedData.clusters.find(c => parseInt(c.clusterId) === oldClusterId);
+        const newClusterBefore = processedData.clusters.find(c => parseInt(c.clusterId) === newClusterId);
+
+        // Step 1: Update the grid's cluster assignment
+        grid.cluster = newClusterId;
+        gridAssignments.set(selectedGridIndex, {clusterId: newClusterId});
+
+        // Step 2: Update processedData.grids
+        processedData.grids[selectedGridIndex].clusterId = newClusterId;
+
+        // Step 3: Reassign buildings in the grid to the new cluster
+        const allBuildings = turf.featureCollection(data.clusters.map(c => turf.point(c.coordinates)));
+        const buildingsInGrid = turf.featureCollection(
+                allBuildings.features.filter((point) => turf.booleanPointInPolygon(point, grid))
+        );
+
+        const buildingIndices = [];
+        const seenBuildings = new Set();
+        buildingsInGrid.features.forEach(point => {
+            const buildingIndex = data.clusters.findIndex(c =>
+                    c.coordinates[0] === point.geometry.coordinates[0] &&
+                    c.coordinates[1] === point.geometry.coordinates[1]
+            );
+            if (buildingIndex !== -1 && !seenBuildings.has(buildingIndex)) {
+                data.clusters[buildingIndex].cluster = newClusterId;
+                data.buildings.features[buildingIndex].properties.cluster_label = newClusterId;
+                processedData.buildings[buildingIndex].clusterId = newClusterId;
+                buildingIndices.push(buildingIndex);
+                seenBuildings.add(buildingIndex);
+            }
+        });
+
+        // Step 4: Update grid color
+        const newColor = getColorForNumber(newClusterId);
+        gridLayer.setStyle({
+            fillColor: newColor,
+            fillOpacity: 0
+        });
+
+        // Step 5: Redraw only the affected buildings
+        buildingIndices.forEach(index => {
+            const buildingFeature = data.buildings.features[index];
+            if (buildingFeature.leafletLayer) {
+                buildingsLayer.removeLayer(buildingFeature.leafletLayer);
+            }
+        });
+
+        const buildingsToRedraw = turf.featureCollection(buildingIndices.map(index => data.buildings.features[index]));
+        L.geoJSON(buildingsToRedraw, {
+            style: (feature) => ({
+                color: "black",
+                weight: 1,
+                fillColor: getColorForNumber(feature.properties.cluster_label),
+                fillOpacity: 0.9
+            }),
+            onEachFeature: (feature, layer) => {
+                const buildingIndex = data.buildings.features.findIndex(f => f === feature);
+                if (buildingIndex !== -1) {
+                    data.buildings.features[buildingIndex].leafletLayer = layer;
                 }
-            });
-            document.getElementById('cluster-count-val').innerText = noOfClusters;
+            }
+        }).addTo(buildingsLayer);
 
-            // Store building details in processedData
-            data.buildings.features.forEach((feature, index) => {
-                const geometry = feature.geometry;
-                if (geometry && geometry.type === "Polygon" && Array.isArray(geometry.coordinates)) {
-                    const coords = geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
-                    const wkt = `POLYGON ((${coords}, ${geometry.coordinates[0][0][0]} ${geometry.coordinates[0][0][1]}))`;
-                    const clusterLabel = data.clusters[index]?.cluster ?? "Unassigned";
-                    processedData.buildings.push({
-                        buildingWKT: wkt,
-                        clusterId: clusterLabel
+        // Step 6: Recompute cluster boundaries and building counts
+        const clusterGroups = groupClusters(data.clusters);
+        processedData.clusters = [];
+        clusterLayer.clearLayers();
+        let noOfClusters = 0;
+
+        Object.entries(clusterGroups).forEach(([clusterId, {points}]) => {
+            if (points.length > 2) {
+                const boundary = turf.convex(turf.featureCollection(points.map(p => turf.point(p))));
+                if (boundary) {
+                    const color = getColorForNumber(parseInt(clusterId));
+                    const boundaryLayer = L.geoJSON(boundary, {
+                        color,
+                        fillOpacity: 0.5,
+                        interactive: false
+                    });
+                    boundaryLayer.bindTooltip(() => {
+                        const clusterData = processedData.clusters.find(c => parseInt(c.clusterId) === parseInt(clusterId));
+                        const updatedBuildingCount = clusterData ? clusterData.buildingCount : points.length;
+                        return `Service Area ${clusterId} \n Number of Buildings: ${updatedBuildingCount}`;
+                    }, {
+                        sticky: true,
+                        direction: 'auto',
+                        opacity: 0.9
+                    });
+                    clusterLayer.addLayer(boundaryLayer);
+                    noOfClusters++;
+
+                    const coords = boundary.geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
+                    const wkt = `POLYGON ((${coords}, ${boundary.geometry.coordinates[0][0][0]} ${boundary.geometry.coordinates[0][0][1]}))`;
+                    processedData.clusters.push({
+                        clusterId,
+                        boundaryWKT: wkt,
+                        buildingCount: points.length
                     });
                 }
-            });
+            }
+        });
+        document.getElementById('cluster-count-val').innerText = noOfClusters;
 
-            gridsData = data;
-            gridsDataExists = true;
-            enableOrDisableHtmlAttribute("clear-grids", false);
-            enableOrDisableHtmlAttribute("download-csv", !gridsDataExists);
-            enableOrDisableHtmlAttribute("download-csv-commcare", !gridsDataExists);
-        }
-        
-        // Helper Functions for drawGrids
-        function groupClusters(clusters) {
-            const clusterGroups = {};
-            clusters.forEach((feature, index) => {
-                const { cluster, coordinates } = feature;
-                if (clusteringType !== 'dbScan' || cluster !== -1) {
-                    if (!clusterGroups[cluster]) {
-                        clusterGroups[cluster] = { points: [], indices: [] };
-                    }
-                    clusterGroups[cluster].points.push(coordinates);
-                    clusterGroups[cluster].indices.push(index);
+        // Step 7: Update the dropdown with neighbor clusters immediately after reassignment
+        setGridNeigboursInDropdown(newClusterId, grid, clusterGroups);
+
+        // Step 8: Update UI for the selected grid
+        document.getElementById('cluster-no').innerText = `Service Area: ${newClusterId}`;
+        document.getElementById('grid-color').innerHTML = `Service Area Color: <span class="color-box" style="background-color: ${newColor};"></span>`;
+
+        // Step 9: Update the click handler for the grid
+        gridLayer.on('click', () => {
+            enableOrDisableHtmlAttribute('grid-details', false, 'hidden');
+            selectedGridIndex = selectedGridIndex;
+            const currentGridData = drawnGrids[selectedGridIndex].grid;
+            const currentCluster = currentGridData.cluster;
+            const currentBuildingCount = currentGridData.buildingCount;
+            document.getElementById('grid-no').innerText = `Delivery Unit: ${selectedGridIndex + 1}`;
+            document.getElementById('cluster-no').innerText = `Service Area: ${currentCluster}`;
+            document.getElementById('grid-buildings').innerText = `Buildings in the DUs: ${currentBuildingCount}`;
+            document.getElementById('grid-color').innerHTML = `Service Area Color: <span class="color-box" style="background-color: ${getColorForNumber(currentCluster)};"></span>`;
+            setGridNeigboursInDropdown(currentCluster, currentGridData, clusterGroups);
+        });
+
+        // Step 10: Remove the grid layer from densityLayer and re-add it
+        densityLayer.removeLayer(gridLayer);
+        densityLayer.addLayer(gridLayer);
+
+        showToast(`Grid reassigned to Service Area ${newClusterId}!`, "success", 2000, "#4CAF50");
+    }
+
+    function setGridNeigboursInDropdown(currentCluster, currentGridData, clusterGroups) {
+        const boundaries = computeBoundaries(clusterGroups);
+
+        const neighborClusters = [];
+        Object.entries(boundaries).forEach(([clusterId, boundary]) => {
+            if (parseInt(clusterId) !== parseInt(currentCluster)) {
+                const intersection = turf.intersect(currentGridData, boundary);
+                if (intersection) {
+                    neighborClusters.push(clusterId);
                 }
-            });
-            return clusterGroups;
-        }
+            }
+        });
 
-        function computeBoundaries(clusterGroups) {
-            const boundaries = {};
-            Object.entries(clusterGroups).forEach(([clusterId, { points }]) => {
-                if (points.length > 2) {
-                    const turfPoints = points.map(p => turf.point(p));
-                    const featureCollection = turf.featureCollection(turfPoints);
-                    boundaries[clusterId] = turf.convex(featureCollection);
+        const dropdown = document.getElementById('neighbor-clusters');
+        dropdown.innerHTML = '';
+        const currentOption = document.createElement('option');
+        currentOption.value = currentCluster;
+        currentOption.text = `Service Area ${currentCluster} (Current)`;
+        dropdown.appendChild(currentOption);
+
+        neighborClusters.forEach(clusterId => {
+            const option = document.createElement('option');
+            option.value = clusterId;
+            option.text = `Service Area ${clusterId}`;
+            dropdown.appendChild(option);
+        });
+    }
+
+    // Helper Functions for drawGrids
+    function groupClusters(clusters) {
+        const clusterGroups = {};
+        clusters.forEach((feature, index) => {
+            const {cluster, coordinates} = feature;
+            if (clusteringType !== 'dbScan' || cluster !== -1) {
+                if (!clusterGroups[cluster]) {
+                    clusterGroups[cluster] = {points: [], indices: []};
                 }
-            });
-            return boundaries;
-        }
+                clusterGroups[cluster].points.push(coordinates);
+                clusterGroups[cluster].indices.push(index);
+            }
+        });
+        return clusterGroups;
+    }
 
-        function getExpandedBbox(featureCollection, buffer) {
-            const bbox = turf.bbox(featureCollection);
-            return [bbox[0] - buffer, bbox[1] - buffer, bbox[2] + buffer, bbox[3] + buffer];
-        }
+    function computeBoundaries(clusterGroups) {
+        const boundaries = {};
+        Object.entries(clusterGroups).forEach(([clusterId, {points}]) => {
+            if (points.length > 2) {
+                const turfPoints = points.map(p => turf.point(p));
+                const featureCollection = turf.featureCollection(turfPoints);
+                boundaries[clusterId] = turf.convex(featureCollection);
+            }
+        });
+        return boundaries;
+    }
 
-        function getBuildingsInGrid(allBuildings, grid, assignedBuildingIndices) {
-            return turf.featureCollection(
+    function getExpandedBbox(featureCollection, buffer) {
+        const bbox = turf.bbox(featureCollection);
+        return [bbox[0] - buffer, bbox[1] - buffer, bbox[2] + buffer, bbox[3] + buffer];
+    }
+
+    function getBuildingsInGrid(allBuildings, grid, assignedBuildingIndices) {
+        return turf.featureCollection(
                 allBuildings.features.filter((point, buildingIndex) => {
                     if (turf.booleanPointInPolygon(point, grid)) {
                         assignedBuildingIndices.add(buildingIndex);
@@ -783,301 +1024,316 @@
                     }
                     return false;
                 })
-            );
-        }
+        );
+    }
 
-        function findMajorityCluster(grid, boundaries) {
-            const intersectingClusters = [];
-            Object.entries(boundaries).forEach(([clusterId, boundary]) => {
-                const intersection = turf.intersect(grid, boundary);
-                if (intersection) {
-                    const area = turf.area(intersection);
-                    intersectingClusters.push({ clusterId, area });
-                }
-            });
-            if (intersectingClusters.length === 0) return null;
-            intersectingClusters.sort((a, b) => b.area - a.area);
-            return intersectingClusters[0].clusterId;
-        }
+    function findMajorityCluster(grid, boundaries) {
+        const intersectingClusters = [];
+        Object.entries(boundaries).forEach(([clusterId, boundary]) => {
+            const intersection = turf.intersect(grid, boundary);
+            if (intersection) {
+                const area = turf.area(intersection);
+                intersectingClusters.push({clusterId, area});
+            }
+        });
+        if (intersectingClusters.length === 0) return null;
+        intersectingClusters.sort((a, b) => b.area - a.area);
+        return intersectingClusters[0].clusterId;
+    }
 
-        function reassignAndDrawBuildings(buildingsInGrid, majorityCluster, data, assignedBuildings) {
-            const buildingsToDraw = [];
-            buildingsInGrid.features.forEach(point => {
-                const buildingIndex = data.clusters.findIndex(c =>
+    function reassignAndDrawBuildings(buildingsInGrid, majorityCluster, data, assignedBuildings) {
+        const buildingsToDraw = [];
+        buildingsInGrid.features.forEach(point => {
+            const buildingIndex = data.clusters.findIndex(c =>
                     c.coordinates[0] === point.geometry.coordinates[0] &&
                     c.coordinates[1] === point.geometry.coordinates[1]
-                );
-                if (buildingIndex === -1) return;
+            );
+            if (buildingIndex === -1) return;
 
-                const coordKey = `${data.clusters[buildingIndex].coordinates[0]},${data.clusters[buildingIndex].coordinates[1]}`;
-                if (assignedBuildings.has(coordKey)) return;
+            const coordKey = `${data.clusters[buildingIndex].coordinates[0]},${data.clusters[buildingIndex].coordinates[1]}`;
+            if (assignedBuildings.has(coordKey)) return;
 
-                data.clusters[buildingIndex].cluster = parseInt(majorityCluster);
-                assignedBuildings.add(coordKey);
+            data.clusters[buildingIndex].cluster = parseInt(majorityCluster);
+            assignedBuildings.add(coordKey);
 
-                const buildingFeature = data.buildings.features[buildingIndex];
-                if (buildingFeature) {
-                    buildingFeature.properties.cluster_label = parseInt(majorityCluster);
-                    buildingsToDraw.push(buildingFeature);
+            const buildingFeature = data.buildings.features[buildingIndex];
+            if (buildingFeature) {
+                buildingFeature.properties.cluster_label = parseInt(majorityCluster);
+                buildingsToDraw.push(buildingFeature);
+            }
+        });
+
+        if (buildingsToDraw.length > 0) {
+            const buildingsGeoJSON = turf.featureCollection(buildingsToDraw);
+            L.geoJSON(buildingsGeoJSON, {
+                style: (feature) => ({
+                    color: 'black',
+                    weight: 1,
+                    fillColor: getColorForNumber(feature.properties.cluster_label),
+                    fillOpacity: 0.9
+                }),
+                onEachFeature: (feature, layer) => {
+                    // Store the Leaflet layer in the feature for later reference
+                    const buildingIndex = data.buildings.features.findIndex(f =>
+                            f === feature
+                    );
+                    if (buildingIndex !== -1) {
+                        data.buildings.features[buildingIndex].leafletLayer = layer;
+                    }
+                }
+            }).addTo(buildingsLayer);
+        }
+    }
+
+    function assignUnassignedBuildings(data, assignedBuildingIndices, assignedBuildings) {
+        const totalBuildings = data.clusters.length;
+        if (assignedBuildingIndices.size === totalBuildings) return;
+
+        console.warn(`Assigning ${totalBuildings - assignedBuildingIndices.size} unassigned buildings to nearest grid...`);
+        const unassignedBuildings = data.clusters.map((c, index) => ({
+            index,
+            point: turf.point(c.coordinates),
+            assigned: assignedBuildingIndices.has(index)
+        })).filter(b => !b.assigned);
+
+        unassignedBuildings.forEach(({index, point}) => {
+            let nearestGrid = null;
+            let minDistance = Infinity;
+            drawnGrids.forEach(grid => {
+                const centroid = turf.centroid(grid);
+                const distance = turf.distance(point, centroid);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    nearestGrid = grid;
                 }
             });
 
-            if (buildingsToDraw.length > 0) {
-                const buildingsGeoJSON = turf.featureCollection(buildingsToDraw);
-                L.geoJSON(buildingsGeoJSON, {
-                    style: () => ({ color: "black", weight: 1, fillOpacity: 0.9 })
-                }).addTo(buildingsLayer);
+            if (nearestGrid) {
+                const gridIndex = drawnGrids.indexOf(nearestGrid);
+                const gridAssignment = gridAssignments.get(gridIndex);
+                if (gridAssignment) {
+                    const majorityCluster = gridAssignment.clusterId;
+                    const coordKey = `${data.clusters[index].coordinates[0]},${data.clusters[index].coordinates[1]}`;
+                    if (!assignedBuildings.has(coordKey)) {
+                        data.clusters[index].cluster = parseInt(majorityCluster);
+                        assignedBuildings.add(coordKey);
+
+                        const buildingFeature = data.buildings.features[index];
+                        if (buildingFeature) {
+                            buildingFeature.properties.cluster_label = parseInt(majorityCluster);
+                            L.geoJSON(buildingFeature, {
+                                style: {color: "black", weight: 1, fillOpacity: 0.9}
+                            }).addTo(buildingsLayer);
+                        }
+                    }
+                }
             }
+        });
+    }
+
+    function drawClusterBoundaries(data) {
+        clusterLayer.clearLayers();
+        const clusterGroups = groupClusters(data.clusters);
+        let noOfClusters = 0;
+
+        Object.entries(clusterGroups).forEach(([clusterId, {points}]) => {
+            if (points.length > 2) {
+                const boundary = turf.convex(turf.featureCollection(points.map(p => turf.point(p))));
+                if (boundary) {
+                    const color = getColorForNumber(parseInt(clusterId));
+                    const boundaryLayer = L.geoJSON(boundary, {
+                        color,
+                        fillOpacity: 0.5,
+                        interactive: false
+                    });
+                    boundaryLayer.bindTooltip(`Service Area ${clusterId} \n Number of Buildings: ${points.length}`, {
+                        sticky: true,
+                        direction: 'auto',
+                        opacity: 0.9
+                    });
+                    clusterLayer.addLayer(boundaryLayer);
+                    noOfClusters++;
+                }
+            }
+        });
+
+        document.getElementById('cluster-count-val').innerText = noOfClusters;
+    }
+
+    function syncBuildingLabels(data) {
+        data.buildings.features.forEach((feature, index) => {
+            const matchingCluster = data.clusters[index];
+            if (matchingCluster) {
+                feature.properties.cluster_label = matchingCluster.cluster;
+            }
+        });
+    }
+
+    function downloadGmapData(data) {
+        if (!processedData.clusters.length && !processedData.grids.length && !processedData.buildings.length) {
+            console.error("No processed data available for download");
+            return;
         }
 
-        function assignUnassignedBuildings(data, assignedBuildingIndices, assignedBuildings) {
-            const totalBuildings = data.clusters.length;
-            if (assignedBuildingIndices.size === totalBuildings) return;
+        // Export clusters
+        let clusterCsvContent = "WKT,name,description\n";
+        processedData.clusters.forEach(cluster => {
+            clusterCsvContent += `"${cluster.boundaryWKT}",Cluster ${cluster.clusterId},${cluster.buildingCount} buildings\n`;
+        });
 
-            console.warn(`Assigning ${totalBuildings - assignedBuildingIndices.size} unassigned buildings to nearest grid...`);
-            const unassignedBuildings = data.clusters.map((c, index) => ({
-                index,
-                point: turf.point(c.coordinates),
-                assigned: assignedBuildingIndices.has(index)
-            })).filter(b => !b.assigned);
+        // Export grids
+        processedData.grids.forEach((grid, index) => {
+            if (grid.buildingCount > 0) {
+                clusterCsvContent += `"${grid.gridWKT}",Grid ${index + 1},${grid.buildingCount} buildings\n`;
+            }
+        });
 
-            unassignedBuildings.forEach(({ index, point }) => {
-                let nearestGrid = null;
-                let minDistance = Infinity;
-                drawnGrids.forEach(grid => {
-                    const centroid = turf.centroid(grid);
-                    const distance = turf.distance(point, centroid);
-                    if (distance < minDistance) {
-                        minDistance = distance;
-                        nearestGrid = grid;
+        // Export buildings
+        let buildingsCsvContent = "WKT,name,description\n";
+        processedData.buildings.forEach((building, index) => {
+            buildingsCsvContent += `"${building.buildingWKT}",Building ${index + 1},Cluster: ${building.clusterId}\n`;
+        });
+
+        downloadCsv(clusterCsvContent, 'service_area_&_delivery_units.csv');
+        downloadCsv(buildingsCsvContent, 'buildings.csv');
+        showToast("CSV downloaded! Import into Google My Maps at mymaps.google.com.", "success", 3000, "#00FF00");
+    }
+
+    function downloadCsvForCommCare(data, gridAssignments) {
+        if (!processedData.grids.length) {
+            console.error("No processed grid data available for CommCare CSV download");
+            return;
+        }
+
+        let csvContent = "name,delivery_target,delivery_count,radius,centroid,bounding_box,service_area,flw,WKT,distance between adj sides 1,distance between adj sides 2,#Buildings,Surface Area (sq. meters)\n";
+        processedData.grids.forEach((grid, index) => {
+            if (grid.buildingCount === 0) return;
+
+            // Compute metrics using stored GeoJSON
+            const geometry = grid.geoJSON.geometry;
+            const bbox = turf.bbox(grid.geoJSON);
+            const widthDeg = bbox[2] - bbox[0], heightDeg = bbox[3] - bbox[1];
+            const widthMeters = widthDeg * 111000 * Math.cos(turf.centroid(grid.geoJSON).geometry.coordinates[1] * Math.PI / 180);
+            const heightMeters = heightDeg * 111000;
+            const diagonal = Math.sqrt(widthMeters * widthMeters + heightMeters * heightMeters);
+            const radius = diagonal / 2;
+            const centroid = turf.centroid(grid.geoJSON).geometry.coordinates;
+            const centroidStr = `${centroid[1]} ${centroid[0]}`;
+            const boundingBox = geometry.coordinates[0].map(coord => `${coord[1]} ${coord[0]}`).join(' ');
+            const surfaceArea = turf.area(grid.geoJSON);
+
+            const gridName = `Delivery Unit ${index + 1}`;
+            const deliveryTarget = 1, deliveryCount = 1;
+            csvContent += `"${gridName}",${deliveryTarget},${deliveryCount},${radius},"${centroidStr}",${boundingBox},${grid.clusterId},"","${grid.gridWKT}",${widthMeters},${heightMeters},${grid.buildingCount},${surfaceArea}\n`;
+        });
+
+        downloadCsv(csvContent, 'csv_for_CommCare.csv');
+        showToast("CommCare CSV downloaded!", "success", 3000, "#00FF00");
+    }
+
+    function downloadSampleCsv() {
+        const clusterCsvContent = `LLO Name,Total Area\n"Test LLO","POLYGON ((13.1623186 11.8734809, 13.1623186 11.8605101, 13.1755186 11.8605101, 13.1755186 11.8734809, 13.1623186 11.8734809))"`;
+        downloadCsv(clusterCsvContent, 'sample_csv_file.csv');
+    }
+
+    function downloadCsv(csvContent, fileName) {
+        const blob = new Blob([csvContent], {type: "text/csv"});
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    }
+
+    function uploadCSVPolygon() {
+        clearOA();
+        const fileInput = document.getElementById("csvUpload");
+        const file = fileInput.files[0];
+        if (!file) return showToast("Please select a CSV file.", "warning", 3000, "#FFA500");
+
+        const reader = new FileReader();
+        reader.onload = function (event) {
+            try {
+                const rows = event.target.result.split('\n').filter(row => row.trim());
+                if (rows.length < 2) throw new Error("CSV has no data rows.");
+
+                const parseCSVRow = row => {
+                    const fields = [];
+                    let inQuotes = false, field = '';
+                    for (let char of row) {
+                        if (char === '"') inQuotes = !inQuotes;
+                        else if (char === ',' && !inQuotes) {
+                            fields.push(field.trim());
+                            field = '';
+                        } else field += char;
                     }
+                    fields.push(field.trim());
+                    return fields;
+                };
+
+                const [header, firstDataRow] = [parseCSVRow(rows[0]), parseCSVRow(rows[1])];
+                if (firstDataRow.length < 2) throw new Error("CSV row lacks sufficient columns.");
+
+                const wktString = firstDataRow[1];
+                if (!wktString.match(/^POLYGON \(\(.*\)\)$/)) throw new Error("Invalid WKT format in CSV.");
+
+                const coordsStr = wktString.match(/POLYGON \(\((.*?)\)\)/)?.[1];
+                if (!coordsStr) throw new Error("Could not parse POLYGON coordinates.");
+
+                const latLngs = coordsStr.split(', ').map(coord => {
+                    const [lon, lat] = coord.split(' ').map(Number);
+                    if (isNaN(lon) || isNaN(lat)) throw new Error("Invalid coordinate values.");
+                    return [lat, lon];
                 });
 
-                if (nearestGrid) {
-                    const gridIndex = drawnGrids.indexOf(nearestGrid);
-                    const gridAssignment = gridAssignments.get(gridIndex);
-                    if (gridAssignment) {
-                        const majorityCluster = gridAssignment.clusterId;
-                        const coordKey = `${data.clusters[index].coordinates[0]},${data.clusters[index].coordinates[1]}`;
-                        if (!assignedBuildings.has(coordKey)) {
-                            data.clusters[index].cluster = parseInt(majorityCluster);
-                            assignedBuildings.add(coordKey);
+                const mockLayer = {
+                    getLatLngs: () => [latLngs.map(([lat, lng]) => ({lat, lng}))],
+                    getBounds: () => L.latLngBounds(latLngs)
+                };
 
-                            const buildingFeature = data.buildings.features[index];
-                            if (buildingFeature) {
-                                buildingFeature.properties.cluster_label = parseInt(majorityCluster);
-                                L.geoJSON(buildingFeature, {
-                                    style: { color: "black", weight: 1, fillOpacity: 0.9 }
-                                }).addTo(buildingsLayer);
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-        function drawClusterBoundaries(data) {
-            clusterLayer.clearLayers();
-            const clusterGroups = groupClusters(data.clusters);
-            let noOfClusters = 0;
-
-            Object.entries(clusterGroups).forEach(([clusterId, { points }]) => {
-                if (points.length > 2) {
-                    const boundary = turf.convex(turf.featureCollection(points.map(p => turf.point(p))));
-                    if (boundary) {
-                        const color = getColorForNumber(parseInt(clusterId));
-                        const boundaryLayer = L.geoJSON(boundary, {
-                            color,
-                            fillOpacity: 0.5,
-                            interactive: false
-                        });
-                        boundaryLayer.bindTooltip(`Service Area ${clusterId} \n Number of Buildings: ${points.length}`, {
-                            sticky: true,
-                            direction: 'auto',
-                            opacity: 0.9
-                        });
-                        clusterLayer.addLayer(boundaryLayer);
-                        noOfClusters++;
-                    }
-                }
-            });
-
-            document.getElementById('cluster-count-val').innerText = noOfClusters;
-        }
-
-        function syncBuildingLabels(data) {
-            data.buildings.features.forEach((feature, index) => {
-                const matchingCluster = data.clusters[index];
-                if (matchingCluster) {
-                    feature.properties.cluster_label = matchingCluster.cluster;
-                }
-            });
-        }
-
-        function downloadGmapData(data) {
-            if (!processedData.clusters.length && !processedData.grids.length && !processedData.buildings.length) {
-                console.error("No processed data available for download");
-                return;
+                addOrUpdatePolygon(mockLayer);
+                showToast("OA loaded from CSV!", "success", 2000, "#4CAF50");
+                document.getElementById("uploaded-file-name").innerText = file.name;
+            } catch (error) {
+                showToast(`Error: ${error.message}`, "error", 3000, "#FF0000");
+                document.getElementById("uploaded-file-name").innerText = 'No File Chosen';
+            } finally {
+                fileInput.value = '';
             }
+        };
+        reader.onerror = () => showToast("Error reading CSV file.", "error", 3000, "#FF0000");
+        reader.readAsText(file);
+    }
 
-            // Export clusters
-            let clusterCsvContent = "WKT,name,description\n";
-            processedData.clusters.forEach(cluster => {
-                clusterCsvContent += `"${cluster.boundaryWKT}",Cluster ${cluster.clusterId},${cluster.buildingCount} buildings\n`;
-            });
+    function fetchData(polygon) {
+        clearClusters();
+        enableOrDisableHtmlAttribute("clear-clusters", true);
+        enableOrDisableHtmlAttribute("run-clustering", true);
+        enableOrDisableHtmlAttribute("clear-oa", true);
+        resetFields();
+        enableOrDisableHtmlAttribute("download-csv", !gridsDataExists);
+        enableOrDisableHtmlAttribute("download-csv-commcare", !gridsDataExists);
 
-            // Export grids
-            processedData.grids.forEach((grid, index) => {
-                if (grid.buildingCount > 0) {
-                    clusterCsvContent += `"${grid.gridWKT}",Grid ${index + 1},${grid.buildingCount} buildings\n`;
-                }
-            });
+        let thresholdVal = document.getElementById("thresholdVal").value || 0.5;
+        if (thresholdVal > 100) thresholdVal = 100
+        if (thresholdVal < 0) thresholdVal = 0
+        const clusteringType = document.getElementById("clusteringType").value;
+        let noOfClusters = document.getElementById("noOfClusters").value;
+        if (noOfClusters <= 0) noOfClusters = 1;
+        let noOfBuildings = document.getElementById("noOfBuildings").value;
+        if (noOfBuildings <= 0) noOfBuildings = 1;
+        const gridLength = document.getElementById("gridLength").value;
 
-            // Export buildings
-            let buildingsCsvContent = "WKT,name,description\n";
-            processedData.buildings.forEach((building, index) => {
-                buildingsCsvContent += `"${building.buildingWKT}",Building ${index + 1},Cluster: ${building.clusterId}\n`;
-            });
+        showToast('Fetching data...', 'info', undefined, '#ff9300');
 
-            downloadCsv(clusterCsvContent, 'service_area_&_delivery_units.csv');
-            downloadCsv(buildingsCsvContent, 'buildings.csv');
-            showToast("CSV downloaded! Import into Google My Maps at mymaps.google.com.", "success", 3000, "#00FF00");
-        }
-
-        function downloadCsvForCommCare(data, gridAssignments) {
-            if (!processedData.grids.length) {
-                console.error("No processed grid data available for CommCare CSV download");
-                return;
-            }
-
-            let csvContent = "name,delivery_target,delivery_count,radius,centroid,bounding_box,service_area,flw,WKT,distance between adj sides 1,distance between adj sides 2,#Buildings,Surface Area (sq. meters)\n";
-            processedData.grids.forEach((grid, index) => {
-                if (grid.buildingCount === 0) return;
-
-                // Compute metrics using stored GeoJSON
-                const geometry = grid.geoJSON.geometry;
-                const bbox = turf.bbox(grid.geoJSON);
-                const widthDeg = bbox[2] - bbox[0], heightDeg = bbox[3] - bbox[1];
-                const widthMeters = widthDeg * 111000 * Math.cos(turf.centroid(grid.geoJSON).geometry.coordinates[1] * Math.PI / 180);
-                const heightMeters = heightDeg * 111000;
-                const diagonal = Math.sqrt(widthMeters * widthMeters + heightMeters * heightMeters);
-                const radius = diagonal / 2;
-                const centroid = turf.centroid(grid.geoJSON).geometry.coordinates;
-                const centroidStr = `${centroid[1]} ${centroid[0]}`;
-                const boundingBox = geometry.coordinates[0].map(coord => `${coord[1]} ${coord[0]}`).join(' ');
-                const surfaceArea = turf.area(grid.geoJSON);
-
-                const gridName = `Delivery Unit ${index + 1}`;
-                const deliveryTarget = 1, deliveryCount = 1;
-                csvContent += `"${gridName}",${deliveryTarget},${deliveryCount},${radius},"${centroidStr}",${boundingBox},${grid.clusterId},"","${grid.gridWKT}",${widthMeters},${heightMeters},${grid.buildingCount},${surfaceArea}\n`;
-            });
-
-            downloadCsv(csvContent, 'csv_for_CommCare.csv');
-            showToast("CommCare CSV downloaded!", "success", 3000, "#00FF00");
-        }
-        function downloadSampleCsv() {
-            const clusterCsvContent = `LLO Name,Total Area\n"Test LLO","POLYGON ((13.1623186 11.8734809, 13.1623186 11.8605101, 13.1755186 11.8605101, 13.1755186 11.8734809, 13.1623186 11.8734809))"`;
-            downloadCsv(clusterCsvContent, 'sample_csv_file.csv');
-        }
-
-        function downloadCsv(csvContent, fileName) {
-            const blob = new Blob([csvContent], { type: "text/csv" });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
-        }
-
-        function uploadCSVPolygon() {
-            clearOA();
-            const fileInput = document.getElementById("csvUpload");
-            const file = fileInput.files[0];
-            if (!file) return showToast("Please select a CSV file.", "warning", 3000, "#FFA500");
-
-            const reader = new FileReader();
-            reader.onload = function(event) {
-                try {
-                    const rows = event.target.result.split('\n').filter(row => row.trim());
-                    if (rows.length < 2) throw new Error("CSV has no data rows.");
-
-                    const parseCSVRow = row => {
-                        const fields = [];
-                        let inQuotes = false, field = '';
-                        for (let char of row) {
-                            if (char === '"') inQuotes = !inQuotes;
-                            else if (char === ',' && !inQuotes) {
-                                fields.push(field.trim());
-                                field = '';
-                            } else field += char;
-                        }
-                        fields.push(field.trim());
-                        return fields;
-                    };
-
-                    const [header, firstDataRow] = [parseCSVRow(rows[0]), parseCSVRow(rows[1])];
-                    if (firstDataRow.length < 2) throw new Error("CSV row lacks sufficient columns.");
-
-                    const wktString = firstDataRow[1];
-                    if (!wktString.match(/^POLYGON \(\(.*\)\)$/)) throw new Error("Invalid WKT format in CSV.");
-
-                    const coordsStr = wktString.match(/POLYGON \(\((.*?)\)\)/)?.[1];
-                    if (!coordsStr) throw new Error("Could not parse POLYGON coordinates.");
-
-                    const latLngs = coordsStr.split(', ').map(coord => {
-                        const [lon, lat] = coord.split(' ').map(Number);
-                        if (isNaN(lon) || isNaN(lat)) throw new Error("Invalid coordinate values.");
-                        return [lat, lon];
-                    });
-
-                    const mockLayer = {
-                        getLatLngs: () => [latLngs.map(([lat, lng]) => ({ lat, lng }))],
-                        getBounds: () => L.latLngBounds(latLngs)
-                    };
-
-                    addOrUpdatePolygon(mockLayer);
-                    showToast("OA loaded from CSV!", "success", 2000, "#4CAF50");
-                    document.getElementById("uploaded-file-name").innerText = file.name;
-                } catch (error) {
-                    showToast(`Error: ${error.message}`, "error", 3000, "#FF0000");
-                    document.getElementById("uploaded-file-name").innerText = 'No File Chosen';
-                } finally {
-                    fileInput.value = '';
-                }
-            };
-            reader.onerror = () => showToast("Error reading CSV file.", "error", 3000, "#FF0000");
-            reader.readAsText(file);
-        }
-
-        function fetchData(polygon) {
-            clearClusters();
-            enableOrDisableHtmlAttribute("clear-clusters", true);
-            enableOrDisableHtmlAttribute("run-clustering", true);
-            enableOrDisableHtmlAttribute("clear-oa", true);
-            resetFields();
-            enableOrDisableHtmlAttribute("download-csv", !gridsDataExists);
-            enableOrDisableHtmlAttribute("download-csv-commcare", !gridsDataExists);
-
-            let thresholdVal = document.getElementById("thresholdVal").value || 0.5;
-            if (thresholdVal > 100) thresholdVal = 100
-            if (thresholdVal <0) thresholdVal = 0
-            const clusteringType = document.getElementById("clusteringType").value;
-            let noOfClusters = document.getElementById("noOfClusters").value;
-            if (noOfClusters <= 0) noOfClusters = 1;
-            let noOfBuildings = document.getElementById("noOfBuildings").value;
-            if (noOfBuildings <= 0) noOfBuildings = 1;
-            const gridLength = document.getElementById("gridLength").value;
-
-            showToast('Fetching data...', 'info', undefined, '#ff9300');
-
-            fetch(`${hostUrl}/get_building_density`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ polygon, thresholdVal, clusteringType, noOfClusters, noOfBuildings, gridLength })
-            })
+        fetch(`${hostUrl}/get_building_density`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({polygon, thresholdVal, clusteringType, noOfClusters, noOfBuildings, gridLength})
+        })
                 .then(response => {
                     enableOrDisableHtmlAttribute("clear-clusters", false);
                     enableOrDisableHtmlAttribute("clear-oa", false);
@@ -1105,9 +1361,9 @@
                     enableOrDisableHtmlAttribute("clear-clusters", false);
                     enableOrDisableHtmlAttribute("clear-oa", false);
                 });
-        }
+    }
 
-        toggleInputFields();
-    </script>
+    toggleInputFields();
+</script>
 </body>
 </html>
