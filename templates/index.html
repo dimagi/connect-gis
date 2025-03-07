@@ -956,30 +956,79 @@
 
     function setGridNeigboursInDropdown(currentCluster, currentGridData, clusterGroups) {
         const boundaries = computeBoundaries(clusterGroups);
-
-        const neighborClusters = [];
-        Object.entries(boundaries).forEach(([clusterId, boundary]) => {
-            if (parseInt(clusterId) !== parseInt(currentCluster)) {
-                const intersection = turf.intersect(currentGridData, boundary);
-                if (intersection) {
-                    neighborClusters.push(clusterId);
-                }
-            }
-        });
-
         const dropdown = document.getElementById('neighbor-clusters');
         dropdown.innerHTML = '';
+
+        // Set to store unique neighboring cluster IDs
+        const neighborClusters = new Set();
+
+        // Step 1: Add current cluster as the first option
         const currentOption = document.createElement('option');
         currentOption.value = currentCluster;
         currentOption.text = `Service Area ${currentCluster} (Current)`;
         dropdown.appendChild(currentOption);
+        neighborClusters.add(parseInt(currentCluster));
 
-        neighborClusters.forEach(clusterId => {
-            const option = document.createElement('option');
-            option.value = clusterId;
-            option.text = `Service Area ${clusterId}`;
-            dropdown.appendChild(option);
+        // Step 2: Find all clusters that intersect with the current grid
+        Object.entries(boundaries).forEach(([clusterId, boundary]) => {
+            if (turf.intersect(currentGridData, boundary)) {
+                neighborClusters.add(parseInt(clusterId));
+            }
         });
+
+        // Step 3: Check horizontally and vertically adjacent grids
+        const gridBbox = turf.bbox(currentGridData);
+        const gridWidth = gridBbox[2] - gridBbox[0];  // longitude difference
+        const gridHeight = gridBbox[3] - gridBbox[1]; // latitude difference
+
+        // Define adjacent grid coordinates (left, right, top, bottom)
+        const adjacentOffsets = [
+            { dx: -gridWidth, dy: 0 },  // left
+            { dx: gridWidth, dy: 0 },   // right
+            { dx: 0, dy: gridHeight },  // top
+            { dx: 0, dy: -gridHeight }  // bottom
+        ];
+
+        adjacentOffsets.forEach(offset => {
+            // Create a shifted grid to check adjacency
+            const adjacentGrid = turf.transformTranslate(
+                currentGridData,
+                Math.sqrt(offset.dx * offset.dx + offset.dy * offset.dy),
+                Math.atan2(offset.dy, offset.dx) * 180 / Math.PI,
+                { units: 'degrees' }
+            );
+
+            // Check if this adjacent grid matches any drawn grid with an assigned cluster
+            let assignedCluster = null;
+            for (let i = 0; i < drawnGrids.length; i++) {
+                const drawnGrid = drawnGrids[i].grid;
+                if (turf.booleanEqual(adjacentGrid, drawnGrid)) {
+                    assignedCluster = parseInt(drawnGrid.cluster);
+                    break;
+                }
+            }
+
+            // If an assigned cluster is found, use it; otherwise, use the majority cluster
+            if (assignedCluster !== null) {
+                neighborClusters.add(assignedCluster);
+            } else {
+                const majorityCluster = findMajorityCluster(adjacentGrid, boundaries);
+                if (majorityCluster !== null) {
+                    neighborClusters.add(parseInt(majorityCluster));
+                }
+            }
+        });
+
+        // Step 4: Add all unique neighboring clusters to dropdown
+        Array.from(neighborClusters)
+            .filter(clusterId => clusterId !== parseInt(currentCluster))
+            .sort((a, b) => a - b) // Sort numerically
+            .forEach(clusterId => {
+                const option = document.createElement('option');
+                option.value = clusterId;
+                option.text = `Service Area ${clusterId}`;
+                dropdown.appendChild(option);
+            });
     }
 
     // Helper Functions for drawGrids
