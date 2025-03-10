@@ -414,9 +414,19 @@
         attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
+    const blackMarkerIcon = L.icon({
+        iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-black.png',
+        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+        iconSize: [25, 41],  // Size of the icon
+        iconAnchor: [12, 41], // Point of the icon which will correspond to marker's location
+        popupAnchor: [1, -34], // Point from which the popup should open relative to the iconAnchor
+        shadowSize: [41, 41]   // Size of the shadow
+    });
+
+
     const drawnItems = new L.FeatureGroup().addTo(map);
     const drawControl = new L.Control.Draw({
-        draw: {polygon: true, rectangle: true, polyline: false, circle: false, marker: true},
+        draw: {polygon: true, rectangle: true, polyline: false, circle: false, marker: {icon: blackMarkerIcon}},
         edit: {featureGroup: drawnItems}
     }).addTo(map);
 
@@ -453,24 +463,25 @@
     map.on(L.Draw.Event.DRAWSTART, () => {
         isDrawing = true;
     });
-// Common handler for both created and edited events
-function handleLayerEvent(layer, layerType = null) {
-    clearOA(); // Clear existing drawings
 
-    if (layerType === 'marker' || layer instanceof L.Marker) {
-        // Handle marker (pin) creation
-        pinLatLng = [layer.getLatLng().lng, layer.getLatLng().lat]; // Store [lng, lat]
-        drawnItems.addLayer(layer);
-        map.panTo(layer.getLatLng());
-        enableOrDisableHtmlAttribute("run-clustering", false);
-        enableOrDisableHtmlAttribute("clear-oa", false);
-        oaLangLats = null;
-    } else if (layerType === 'polygon' || layerType === 'rectangle' || layer instanceof L.Polygon) {
-        // Handle polygon or rectangle creation/editing
-        addOrUpdatePolygon(layer);
-        pinLatLng = null;
+    // Common handler for both created and edited events
+    function handleLayerEvent(layer, layerType = null) {
+        clearOA(); // Clear existing drawings
+
+        if (layerType === 'marker' || layer instanceof L.Marker) {
+            // Handle marker (pin) creation
+            pinLatLng = [layer.getLatLng().lng, layer.getLatLng().lat]; // Store [lng, lat]
+            drawnItems.addLayer(layer);
+            map.panTo(layer.getLatLng());
+            enableOrDisableHtmlAttribute("run-clustering", false);
+            enableOrDisableHtmlAttribute("clear-oa", false);
+            oaLangLats = null;
+        } else if (layerType === 'polygon' || layerType === 'rectangle' || layer instanceof L.Polygon) {
+            // Handle polygon or rectangle creation/editing
+            addOrUpdatePolygon(layer);
+            pinLatLng = null;
+        }
     }
-}
 
     // Apply the common handler for both events
     map.on(L.Draw.Event.CREATED, (event) => handleLayerEvent(event.layer, event.layerType));
