@@ -339,6 +339,7 @@
                     <select id="clusteringType" onchange="toggleInputFields()">
                         <option value="kMeans">K-Means Clustering</option>
                         <option value="balancedKMeans">Balanced K Means</option>
+                        <option value="bottomUp">Bottom-Up Approach</option>
                     </select>
                 </div>
                 <div id="noOfClustersIP" class="hidden input-group">
@@ -365,7 +366,7 @@
             <h3>Actions</h3>
             <div class="block-content">
                 <div class="button-row">
-                    <button onclick="fetchData(oaLangLats, false)" id="run-clustering" disabled>Get Service Areas
+                    <button onclick="fetchData(oaLangLats, pinLatLng)" id="run-clustering" disabled>Get Service Areas
                     </button>
                     <button onclick="clearClusters()" id="clear-clusters" disabled>Clear Service Areas</button>
                 </div>
@@ -406,6 +407,7 @@
         buildings: []
     };
     let selectedGridIndex = null; // Store the index of the currently selected grid
+    let pinLatLng = null;
     // Map Setup
     const map = L.map('map').setView([9.082, 8.6753], 6);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -414,7 +416,7 @@
 
     const drawnItems = new L.FeatureGroup().addTo(map);
     const drawControl = new L.Control.Draw({
-        draw: {polygon: true, rectangle: true, polyline: false, circle: false, marker: false},
+        draw: {polygon: true, rectangle: true, polyline: false, circle: false, marker: true},
         edit: {featureGroup: drawnItems}
     }).addTo(map);
 
@@ -451,8 +453,30 @@
     map.on(L.Draw.Event.DRAWSTART, () => {
         isDrawing = true;
     });
-    map.on(L.Draw.Event.CREATED, (event) => addOrUpdatePolygon(event.layer));
-    map.on(L.Draw.Event.EDITED, (event) => event.layers.eachLayer(layer => addOrUpdatePolygon(layer)));
+// Common handler for both created and edited events
+function handleLayerEvent(layer, layerType = null) {
+    clearOA(); // Clear existing drawings
+
+    if (layerType === 'marker' || layer instanceof L.Marker) {
+        // Handle marker (pin) creation
+        pinLatLng = [layer.getLatLng().lng, layer.getLatLng().lat]; // Store [lng, lat]
+        drawnItems.addLayer(layer);
+        map.panTo(layer.getLatLng());
+        enableOrDisableHtmlAttribute("run-clustering", false);
+        enableOrDisableHtmlAttribute("clear-oa", false);
+        oaLangLats = null;
+    } else if (layerType === 'polygon' || layerType === 'rectangle' || layer instanceof L.Polygon) {
+        // Handle polygon or rectangle creation/editing
+        addOrUpdatePolygon(layer);
+        pinLatLng = null;
+    }
+}
+
+    // Apply the common handler for both events
+    map.on(L.Draw.Event.CREATED, (event) => handleLayerEvent(event.layer, event.layerType));
+    map.on(L.Draw.Event.EDITED, (event) => {
+        event.layers.eachLayer(layer => handleLayerEvent(layer));
+    });
 
     // Utility Functions
     function showToast(title, icon, timer, background, width = '250px') {
@@ -483,9 +507,26 @@
 
     function toggleInputFields() {
         const method = document.getElementById("clusteringType").value;
-        document.getElementById("noOfClustersIP").style.display = method === "kMeans" ? "block" : "none";
-        document.getElementById("thresholdValueIP").style.display = ["kMeans", "balancedKMeans"].includes(method) ? "block" : "none";
-        document.getElementById("noOfBuildingsIP").style.display = ["balancedKMeans"].includes(method) ? "block" : "none";
+        const noOfClustersIP = document.getElementById("noOfClustersIP");
+        const noOfBuildingsIP = document.getElementById("noOfBuildingsIP");
+        const thresholdValueIP = document.getElementById("thresholdValueIP");
+        const gridLengthIP = document.getElementById("gridLengthIP");
+
+        // Reset all to hidden
+        noOfClustersIP.style.display = "none";
+        noOfBuildingsIP.style.display = "none";
+        thresholdValueIP.style.display = "none";
+        gridLengthIP.style.display = "block"; // Always show grid length
+        thresholdValueIP.style.display = "block";
+        // Show relevant fields based on method
+        if (method === "kMeans") {
+            noOfClustersIP.style.display = "block";
+        } else if (method === "balancedKMeans") {
+            noOfBuildingsIP.style.display = "block";
+        } else if (method === "bottomUp") {
+            noOfClustersIP.style.display = "block";
+            noOfBuildingsIP.style.display = "block";
+        }
     }
 
     // Map Data Functions
@@ -648,7 +689,6 @@
                     direction: 'auto',
                     opacity: 0.9
                 });
-                console.log('asdfafsd')
                 clusterLayer.addLayer(boundaryLayer);
                 noOfClusters++;
             }
@@ -1134,81 +1174,6 @@
         }
     }
 
-    function assignUnassignedBuildings(data, assignedBuildingIndices, assignedBuildings) {
-        const totalBuildings = data.clusters.length;
-        if (assignedBuildingIndices.size === totalBuildings) return;
-
-        console.warn(`Assigning ${totalBuildings - assignedBuildingIndices.size} unassigned buildings to nearest grid...`);
-        const unassignedBuildings = data.clusters.map((c, index) => ({
-            index,
-            point: turf.point(c.coordinates),
-            assigned: assignedBuildingIndices.has(index)
-        })).filter(b => !b.assigned);
-
-        unassignedBuildings.forEach(({index, point}) => {
-            let nearestGrid = null;
-            let minDistance = Infinity;
-            drawnGrids.forEach(grid => {
-                const centroid = turf.centroid(grid);
-                const distance = turf.distance(point, centroid);
-                if (distance < minDistance) {
-                    minDistance = distance;
-                    nearestGrid = grid;
-                }
-            });
-
-            if (nearestGrid) {
-                const gridIndex = drawnGrids.indexOf(nearestGrid);
-                const gridAssignment = gridAssignments.get(gridIndex);
-                if (gridAssignment) {
-                    const majorityCluster = gridAssignment.clusterId;
-                    const coordKey = `${data.clusters[index].coordinates[0]},${data.clusters[index].coordinates[1]}`;
-                    if (!assignedBuildings.has(coordKey)) {
-                        data.clusters[index].cluster = parseInt(majorityCluster);
-                        assignedBuildings.add(coordKey);
-
-                        const buildingFeature = data.buildings.features[index];
-                        if (buildingFeature) {
-                            buildingFeature.properties.cluster_label = parseInt(majorityCluster);
-                            L.geoJSON(buildingFeature, {
-                                style: {color: "black", weight: 1, fillOpacity: 0.9}
-                            }).addTo(buildingsLayer);
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    function drawClusterBoundaries(data) {
-        clusterLayer.clearLayers();
-        const clusterGroups = groupClusters(data.clusters);
-        let noOfClusters = 0;
-
-        Object.entries(clusterGroups).forEach(([clusterId, {points}]) => {
-            if (points.length > 2) {
-                const boundary = turf.convex(turf.featureCollection(points.map(p => turf.point(p))));
-                if (boundary) {
-                    const color = getColorForNumber(parseInt(clusterId));
-                    const boundaryLayer = L.geoJSON(boundary, {
-                        color,
-                        fillOpacity: 0.5,
-                        interactive: false
-                    });
-                    boundaryLayer.bindTooltip(`Service Area ${clusterId} \n Number of Buildings: ${points.length}`, {
-                        sticky: true,
-                        direction: 'auto',
-                        opacity: 0.9
-                    });
-                    clusterLayer.addLayer(boundaryLayer);
-                    noOfClusters++;
-                }
-            }
-        });
-
-        document.getElementById('cluster-count-val').innerText = noOfClusters;
-    }
-
     function syncBuildingLabels(data) {
         data.buildings.features.forEach((feature, index) => {
             const matchingCluster = data.clusters[index];
@@ -1357,7 +1322,27 @@
         reader.readAsText(file);
     }
 
-    function fetchData(polygon) {
+    function validateClusteringInputs(clusteringType, pinLatLng, polygon) {
+        const showWarning = (message) => {
+            showToast(message, "warning", 3000, "#FFA500");
+            enableOrDisableHtmlAttribute("run-clustering", false);
+            enableOrDisableHtmlAttribute("clear-oa", false);
+        };
+
+        if (clusteringType === "bottomUp" && !pinLatLng) {
+            showWarning("Please drop a pin on the map first.");
+            return false;
+        }
+
+        if (clusteringType !== "bottomUp" && (!polygon || polygon.length === 0)) {
+            showWarning("Please draw a polygon on the map first.");
+            return false;
+        }
+
+        return true;
+    }
+
+    function fetchData(polygon, pinLatLng) {
         clearClusters();
         enableOrDisableHtmlAttribute("clear-clusters", true);
         enableOrDisableHtmlAttribute("run-clustering", true);
@@ -1367,8 +1352,8 @@
         enableOrDisableHtmlAttribute("download-csv-commcare", !gridsDataExists);
 
         let thresholdVal = document.getElementById("thresholdVal").value || 0.5;
-        if (thresholdVal > 100) thresholdVal = 100
-        if (thresholdVal < 0) thresholdVal = 0
+        if (thresholdVal > 100) thresholdVal = 100;
+        if (thresholdVal < 0) thresholdVal = 0;
         const clusteringType = document.getElementById("clusteringType").value;
         let noOfClusters = document.getElementById("noOfClusters").value;
         if (noOfClusters <= 0) noOfClusters = 1;
@@ -1376,40 +1361,55 @@
         if (noOfBuildings <= 0) noOfBuildings = 1;
         const gridLength = document.getElementById("gridLength").value;
 
+        let requestBody;
+        if (!validateClusteringInputs(clusteringType, pinLatLng, polygon)) {
+            return;
+        }
+
+        requestBody = {
+            pin: pinLatLng, // Send [lng, lat]
+            polygon,
+            clusteringType,
+            noOfClusters,
+            noOfBuildings,
+            gridLength,
+            thresholdVal
+        };
+
         showToast('Fetching data...', 'info', undefined, '#ff9300');
 
         fetch(`${hostUrl}/get_building_density`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({polygon, thresholdVal, clusteringType, noOfClusters, noOfBuildings, gridLength})
+            body: JSON.stringify(requestBody)
         })
-                .then(response => {
-                    enableOrDisableHtmlAttribute("clear-clusters", false);
-                    enableOrDisableHtmlAttribute("clear-oa", false);
-                    enableOrDisableHtmlAttribute("run-clustering", false);
-                    return response.json();
-                })
-                .then(data => {
-                    Swal.close();
-                    if (data.error) {
-                        showToast(`Error: ${data.error}`, 'error', 5000, '#FF0000', '300px');
-                    } else {
-                        showToast('Data loaded!', 'success', 2000, '#4CAF50');
-                        document.getElementById('building-count').innerText = data.building_count ?? "Error fetching data";
-                        lastFetchedData = data;
-                        addBuildings(data);
-                        addClusters(data, true);
-                        enableOrDisableHtmlAttribute("get-grids", false);
-                    }
-                })
-                .catch(error => {
-                    Swal.close();
-                    showToast(`Error: ${error.message}`, 'error', 5000, '#FF0000', '300px');
-                    console.error('Error:', error);
-                    document.getElementById('building-count').innerText = "Error fetching data";
-                    enableOrDisableHtmlAttribute("clear-clusters", false);
-                    enableOrDisableHtmlAttribute("clear-oa", false);
-                });
+            .then(response => {
+                enableOrDisableHtmlAttribute("clear-clusters", false);
+                enableOrDisableHtmlAttribute("clear-oa", false);
+                enableOrDisableHtmlAttribute("run-clustering", false);
+                return response.json();
+            })
+            .then(data => {
+                Swal.close();
+                if (data.error) {
+                    showToast(`Error: ${data.error}`, 'error', 5000, '#FF0000', '300px');
+                } else {
+                    showToast('Data loaded!', 'success', 2000, '#4CAF50');
+                    document.getElementById('building-count').innerText = data.building_count ?? "Error fetching data";
+                    lastFetchedData = data;
+                    addBuildings(data);
+                    addClusters(data, true);
+                    enableOrDisableHtmlAttribute("get-grids", false);
+                }
+            })
+            .catch(error => {
+                Swal.close();
+                showToast(`Error: ${error.message}`, 'error', 5000, '#FF0000', '300px');
+                console.error('Error:', error);
+                document.getElementById('building-count').innerText = "Error fetching data";
+                enableOrDisableHtmlAttribute("clear-clusters", false);
+                enableOrDisableHtmlAttribute("clear-oa", false);
+            });
     }
 
     toggleInputFields();
