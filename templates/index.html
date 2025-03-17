@@ -1273,7 +1273,7 @@
             const surfaceArea = turf.area(grid.geoJSON);
 
             const gridName = `Delivery Unit ${index + 1}`;
-            const deliveryTarget = 1, deliveryCount = 1;
+            const deliveryTarget = 1, deliveryCount = 0;
             csvContent += `"${gridName}",${deliveryTarget},${deliveryCount},${radius},"${centroidStr}",${boundingBox},${grid.clusterId},"","${grid.gridWKT}",${widthMeters},${heightMeters},${grid.buildingCount},${surfaceArea}\n`;
         });
 
