@@ -398,11 +398,12 @@ def get_building_density():
         no_of_clusters = int(data.get("noOfClusters", 3))
         no_of_buildings = int(data.get("noOfBuildings", 250))
         tolerance = float(data.get("thresholdVal", 10)) / 100  # Percentage to decimal
+        fetchClusters = bool(data.get("fetchClusters", False))
 
         if clustering_type == "bottomUp":
             return handle_bottom_up_clustering(data, no_of_clusters, no_of_buildings, tolerance)
         else:
-            return handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of_buildings, tolerance)
+            return handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of_buildings, tolerance, fetchClusters)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 400
@@ -554,7 +555,7 @@ def handle_bottom_up_clustering(data, no_of_clusters, no_of_buildings, tolerance
     })
 
 
-def handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of_buildings, tolerance):
+def handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of_buildings, tolerance, fetchClusters):
     polygon_coords = data.get("polygon", [])
     if not polygon_coords:
         return jsonify({"error": "Invalid polygon coordinates"}), 400
@@ -567,29 +568,32 @@ def handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of
     ]
 
     if not coordinates:
-        return jsonify({"message": "No buildings found within the polygon"}), 404
+        return jsonify({"message": "No buildings found within the polygon", "building_count" : 0}), 404
 
     coordinates = np.array(coordinates)
     buildings_count = len(coordinates)
     kVal = int(buildings_count / no_of_buildings)
 
-    # Perform appropriate clustering based on the type
-    if clustering_type == 'kMeans':
-        clusters = optimized_balanced_kmeans_constrained_with_no_of_clusters(
-            buildings_geojson, coordinates, no_of_clusters, tolerance
-        )
-    elif clustering_type == 'balancedKMeans':
-        clusters = optimized_balanced_kmeans_constrained_with_buildings_count(
-            buildings_geojson, coordinates, no_of_buildings, tolerance
-        )
-    elif clustering_type == 'dbScan':
-        clusters = cluster_buildings_dbscan(buildings_geojson, coordinates, int(no_of_buildings))
-    elif clustering_type == 'hierarchicalClustering':
-        clusters = cluster_buildings_with_size(buildings_geojson, coordinates, 100, tolerance)
-    elif clustering_type == 'greedyDivision':
-        clusters = cluster_buildings_kMeans(buildings_geojson, coordinates, int(kVal))
-    else:
-        return jsonify({"error": f"Unsupported clustering type: {clustering_type}"}), 400
+    clusters = None
+
+    if(fetchClusters):
+        # Perform appropriate clustering based on the type
+        if clustering_type == 'kMeans':
+            clusters = optimized_balanced_kmeans_constrained_with_no_of_clusters(
+                buildings_geojson, coordinates, no_of_clusters, tolerance
+            )
+        elif clustering_type == 'balancedKMeans':
+            clusters = optimized_balanced_kmeans_constrained_with_buildings_count(
+                buildings_geojson, coordinates, no_of_buildings, tolerance
+            )
+        elif clustering_type == 'dbScan':
+            clusters = cluster_buildings_dbscan(buildings_geojson, coordinates, int(no_of_buildings))
+        elif clustering_type == 'hierarchicalClustering':
+            clusters = cluster_buildings_with_size(buildings_geojson, coordinates, 100, tolerance)
+        elif clustering_type == 'greedyDivision':
+            clusters = cluster_buildings_kMeans(buildings_geojson, coordinates, int(kVal))
+        else:
+            return jsonify({"error": f"Unsupported clustering type: {clustering_type}"}), 400
 
     return jsonify({
         "building_count": buildings_count,

@@ -20,7 +20,7 @@
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <style>
         #map {
-            height: 59vh;
+            height: 85vh;
             width: 100%;
         }
 
@@ -295,7 +295,7 @@
         <div id="map"></div>
         <br>
         <div id="grid-details" hidden>
-            <h3>Delivery Unit Details</h3>
+            <h3>Delivery Unit Details <span id="close-grid-details" style="float: right; cursor: pointer; font-size: 18px; color: #555;">&times;</span></h3>
             <p id="grid-no">Grid No: None</p>
             <p id="cluster-no">Cluster No: None</p>
             <p id="grid-color">Cluster Color: <span class="color-box" style="background-color: transparent;"></span>
@@ -366,9 +366,9 @@
             <h3>Actions</h3>
             <div class="block-content">
                 <div class="button-row">
-                    <button onclick="fetchData(oaLangLats, pinLatLng)" id="run-clustering" disabled>Get Service Areas
+                    <button onclick="fetchData(oaLangLats, pinLatLng, true)" id="run-clustering" disabled>Get Service Areas
                     </button>
-                    <button onclick="clearClusters()" id="clear-clusters" disabled>Clear Service Areas</button>
+                    <button onclick="clearClusters(false)" id="clear-clusters" disabled>Clear Service Areas</button>
                 </div>
                 <div class="button-row">
                     <button onclick="drawGrids(lastFetchedData)" id="get-grids" disabled>Get Delivery Units</button>
@@ -377,7 +377,8 @@
                     </button>
                 </div>
                 <div class="button-row">
-                    <button onclick="clearOA()" id="clear-oa" disabled class="full-width">Clear Map</button>
+                    <button onclick="clearOA()" id="clear-oa" disabled >Clear Map</button>
+                    <button onclick="downloadOAWkt()" id="downloadOaWkt" disabled>Download OA WKT</button>
                 </div>
                 <div class="button-row">
                     <button onclick="downloadGmapData(gridsData)" id="download-csv" disabled>Download CSV For My Maps
@@ -408,6 +409,8 @@
     };
     let selectedGridIndex = null; // Store the index of the currently selected grid
     let pinLatLng = null;
+    let mapDefaultHeight = '85vh'
+
     // Map Setup
     const map = L.map('map').setView([9.082, 8.6753], 6);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -475,6 +478,7 @@
             map.panTo(layer.getLatLng());
             enableOrDisableHtmlAttribute("run-clustering", false);
             enableOrDisableHtmlAttribute("clear-oa", false);
+            enableOrDisableHtmlAttribute("downloadOaWkt", false);
             oaLangLats = null;
         } else if (layerType === 'polygon' || layerType === 'rectangle' || layer instanceof L.Polygon) {
             // Handle polygon or rectangle creation/editing
@@ -507,6 +511,7 @@
     }
 
     function getColorForNumber(num) {
+        if (num == null || num == undefined) return "black"
         const hue = (num * 137) % 360;
         return `hsl(${hue}, 90%, 50%)`;
     }
@@ -538,6 +543,7 @@
             noOfClustersIP.style.display = "block";
             noOfBuildingsIP.style.display = "block";
         }
+        document.getElementById('close-grid-details').addEventListener('click', () => reSizeMap(mapDefaultHeight, true));
     }
 
     // Map Data Functions
@@ -617,19 +623,23 @@
         drawnItems.clearLayers();
         enableOrDisableHtmlAttribute("run-clustering", true);
         enableOrDisableHtmlAttribute("get-grids", true);
-        clearClusters();
+        clearClusters(true);
         enableOrDisableHtmlAttribute("clear-oa", true);
+        enableOrDisableHtmlAttribute("downloadOaWkt", true);
         document.getElementById("uploaded-file-name").innerText = 'No File Chosen';
     }
 
-    function clearClusters() {
-        buildingsLayer.clearLayers();
+    function clearClusters(clearBuildings) {
+        if(clearBuildings) {
+            buildingsLayer.clearLayers();
+            document.getElementById('building-count').innerText = 0;
+        }
         clusterLayer.clearLayers();
-        document.getElementById('cluster-count-val').innerText = 0;
         resetFields();
         enableOrDisableHtmlAttribute("clear-clusters", true);
         enableOrDisableHtmlAttribute("get-grids", true);
         clearGrids();
+        document.getElementById('cluster-count-val').innerText = 0;
     }
 
     function clearGrids() {
@@ -640,6 +650,7 @@
         enableOrDisableHtmlAttribute("download-csv-commcare", !gridsDataExists);
         enableOrDisableHtmlAttribute('grid-details', true, 'hidden')
         processedData = {clusters: [], grids: [], buildings: []};
+        reSizeMap(mapDefaultHeight, true)
     }
 
     function resetFields() {
@@ -666,15 +677,17 @@
         oaLangLats = layer.getLatLngs()[0].map(coord => [coord.lng, coord.lat]);
         enableOrDisableHtmlAttribute("run-clustering", false);
         enableOrDisableHtmlAttribute("clear-oa", false);
+        enableOrDisableHtmlAttribute("downloadOaWkt", false);
+        fetchData(oaLangLats, null, false)
     }
 
     function addBuildings(data) {
+
         buildingsLayer.clearLayers();
         if (!data.buildings) return;
-
         L.geoJSON(data.buildings, {
             style: (feature) => ({
-                color: "black",
+                color: getColorForNumber(feature?.properties?.cluster_label),
                 weight: 1,
                 fillColor: getColorForNumber(feature.properties.cluster_label),
                 fillOpacity: 0.9
@@ -694,8 +707,8 @@
             const boundary = turf.convex(turf.featureCollection(points.map(p => turf.point(p))));
             if (boundary) {
                 const color = getColorForNumber(parseInt(clusterId));
-                const boundaryLayer = L.geoJSON(boundary, {color, fillOpacity: 0.5, interactive: interactive});
-                boundaryLayer.bindTooltip(`Service Area ${clusterId} \n Number of Buildings: ${points.length}`, {
+                const boundaryLayer = L.geoJSON(boundary, {color, fillOpacity: 0, interactive: interactive});
+                boundaryLayer.bindTooltip(`Service Area ${parseInt(clusterId) + 1} \n Number of Buildings: ${points.length}`, {
                     sticky: true,
                     direction: 'auto',
                     opacity: 0.9
@@ -706,6 +719,18 @@
         });
 
         document.getElementById('cluster-count-val').innerText = noOfClusters;
+    }
+
+    function reSizeMap(mapHeight, hideGrids) {
+        const mapElement = document.getElementById('map');
+        mapElement.style.height = mapHeight;
+        mapElement.style.transition = 'height 0.3s ease'; // Optional: smooth transition
+        
+        // Update map size after resize
+        setTimeout(() => {
+            map.invalidateSize(); // Force Leaflet to recalculate map size
+        }, 50);
+        enableOrDisableHtmlAttribute('grid-details', hideGrids, 'hidden');
     }
 
     function drawGrids(lastFetchedData) {
@@ -745,16 +770,16 @@
             const color = getColorForNumber(parseInt(majorityCluster));
             const gridLayer = L.geoJSON(currentGrid, {
                 style: {
-                    color: "black",
+                    color: color,
                     weight: hasBuildings ? 1 : 0,
-                    fillOpacity: 0,
+                    fillOpacity: hasBuildings ? 0.4 : 0,
                     opacity: hasBuildings ? 1 : 0
                 }
             });
 
             // Dynamically fetch building count from processedData.clusters
             gridLayer.bindTooltip(() => {
-                return `Service Area ${currentGrid.cluster} \n Number of Buildings: ${processedData.clusters.find(c => parseInt(c.clusterId) === parseInt(currentGrid.cluster)).buildingCount}`;
+                return `Service Area ${parseInt(currentGrid.cluster) + 1} \n Number of Buildings: ${processedData.clusters.find(c => parseInt(c.clusterId) === parseInt(currentGrid.cluster)).buildingCount}`;
             }, {
                 sticky: true,
                 direction: 'auto',
@@ -778,19 +803,18 @@
                 });
 
                 gridLayer.on('click', () => {
-                    enableOrDisableHtmlAttribute('grid-details', false, 'hidden');
+                    reSizeMap('59vh', false)
                     selectedGridIndex = gridIndex - 1;
                     const currentGridData = drawnGrids[selectedGridIndex].grid;
                     const currentCluster = currentGridData.cluster;
                     const currentBuildingCount = currentGridData.buildingCount;
                     document.getElementById('grid-no').innerText = `Delivery Unit: ${gridIndex}`;
-                    document.getElementById('cluster-no').innerText = `Service Area: ${currentCluster}`;
+                    document.getElementById('cluster-no').innerText = `Service Area: ${parseInt(currentCluster) + 1}`;
                     document.getElementById('grid-buildings').innerText = `Buildings in the DUs: ${currentBuildingCount}`;
                     document.getElementById('grid-color').innerHTML = `Service Area Color: <span class="color-box" style="background-color: ${getColorForNumber(currentCluster)};"></span>`;
 
                     // Recompute clusterGroups and boundaries for neighbor detection
                     setGridNeigboursInDropdown(currentCluster, currentGrid, groupClusters(data.clusters))
-                    enableOrDisableHtmlAttribute('draw-grids',false,'hidden')
                 });
 
             }
@@ -814,13 +838,13 @@
                         interactive: false
                     });
                     boundaryLayer.bindTooltip(() => {
-                        return `Service Area ${clusterId} \n Number of Buildings: ${processedData.clusters.find(c => parseInt(c.clusterId) === parseInt(clusterId)).buildingCount}`;
+                        return `Service Area ${parseInt(clusterId) + 1} \n Number of Buildings: ${processedData.clusters.find(c => parseInt(c.clusterId) === parseInt(clusterId)).buildingCount}`;
                     }, {
                         sticky: true,
                         direction: 'auto',
                         opacity: 0.9
                     });
-                    clusterLayer.addLayer(boundaryLayer);
+                    // clusterLayer.addLayer(boundaryLayer);
                     noOfClusters++;
 
                     const coords = boundary.geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
@@ -909,8 +933,8 @@
         // Step 4: Update grid color
         const newColor = getColorForNumber(newClusterId);
         gridLayer.setStyle({
-            fillColor: newColor,
-            fillOpacity: 0
+            color: newColor,
+            fillOpacity: 0.4
         });
 
         // Step 5: Redraw only the affected buildings
@@ -956,13 +980,13 @@
                     boundaryLayer.bindTooltip(() => {
                         const clusterData = processedData.clusters.find(c => parseInt(c.clusterId) === parseInt(clusterId));
                         const updatedBuildingCount = clusterData ? clusterData.buildingCount : points.length;
-                        return `Service Area ${clusterId} \n Number of Buildings: ${updatedBuildingCount}`;
+                        return `Service Area ${parseInt(clusterId) + 1} \n Number of Buildings: ${updatedBuildingCount}`;
                     }, {
                         sticky: true,
                         direction: 'auto',
                         opacity: 0.9
                     });
-                    clusterLayer.addLayer(boundaryLayer);
+                    // clusterLayer.addLayer(boundaryLayer);
                     noOfClusters++;
 
                     const coords = boundary.geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
@@ -981,18 +1005,19 @@
         setGridNeigboursInDropdown(newClusterId, grid, clusterGroups);
 
         // Step 8: Update UI for the selected grid
-        document.getElementById('cluster-no').innerText = `Service Area: ${newClusterId}`;
+        document.getElementById('cluster-no').innerText = `Service Area: ${parseInt(newClusterId) + 1}`;
         document.getElementById('grid-color').innerHTML = `Service Area Color: <span class="color-box" style="background-color: ${newColor};"></span>`;
 
         // Step 9: Update the click handler for the grid
         gridLayer.on('click', () => {
+            reSizeMap('59vh', false)
             enableOrDisableHtmlAttribute('grid-details', false, 'hidden');
             selectedGridIndex = selectedGridIndex;
             const currentGridData = drawnGrids[selectedGridIndex].grid;
             const currentCluster = currentGridData.cluster;
             const currentBuildingCount = currentGridData.buildingCount;
             document.getElementById('grid-no').innerText = `Delivery Unit: ${selectedGridIndex + 1}`;
-            document.getElementById('cluster-no').innerText = `Service Area: ${currentCluster}`;
+            document.getElementById('cluster-no').innerText = `Service Area: ${parseInt(currentCluster) + 1}`;
             document.getElementById('grid-buildings').innerText = `Buildings in the DUs: ${currentBuildingCount}`;
             document.getElementById('grid-color').innerHTML = `Service Area Color: <span class="color-box" style="background-color: ${getColorForNumber(currentCluster)};"></span>`;
             setGridNeigboursInDropdown(currentCluster, currentGridData, clusterGroups);
@@ -1002,7 +1027,7 @@
         densityLayer.removeLayer(gridLayer);
         densityLayer.addLayer(gridLayer);
 
-        showToast(`Grid reassigned to Service Area ${newClusterId}!`, "success", 2000, "#4CAF50");
+        showToast(`Grid reassigned to Service Area ${parseInt(newClusterId) + 1}!`, "success", 2000, "#4CAF50");
     }
 
     function setGridNeigboursInDropdown(currentCluster, currentGridData, clusterGroups) {
@@ -1016,7 +1041,7 @@
         // Step 1: Add current cluster as the first option
         const currentOption = document.createElement('option');
         currentOption.value = currentCluster;
-        currentOption.text = `Service Area ${currentCluster} (Current)`;
+        currentOption.text = `Service Area ${parseInt(currentCluster) + 1} (Current)`;
         dropdown.appendChild(currentOption);
         neighborClusters.add(parseInt(currentCluster));
 
@@ -1077,7 +1102,7 @@
             .forEach(clusterId => {
                 const option = document.createElement('option');
                 option.value = clusterId;
-                option.text = `Service Area ${clusterId}`;
+                option.text = `Service Area ${parseInt(clusterId) + 1}`;
                 dropdown.appendChild(option);
             });
     }
@@ -1203,20 +1228,20 @@
         // Export clusters
         let clusterCsvContent = "WKT,name,description\n";
         processedData.clusters.forEach(cluster => {
-            clusterCsvContent += `"${cluster.boundaryWKT}",Cluster ${cluster.clusterId},${cluster.buildingCount} buildings\n`;
+            clusterCsvContent += `"${cluster.boundaryWKT}",SA ${parseInt(cluster.clusterId) + 1},${cluster.buildingCount} buildings\n`;
         });
 
         // Export grids
         processedData.grids.forEach((grid, index) => {
             if (grid.buildingCount > 0) {
-                clusterCsvContent += `"${grid.gridWKT}",Grid ${index + 1},${grid.buildingCount} buildings\n`;
+                clusterCsvContent += `"${grid.gridWKT}",DU ${index + 1},${grid.buildingCount} buildings\n`;
             }
         });
 
         // Export buildings
         let buildingsCsvContent = "WKT,name,description\n";
         processedData.buildings.forEach((building, index) => {
-            buildingsCsvContent += `"${building.buildingWKT}",Building ${index + 1},Cluster: ${building.clusterId}\n`;
+            buildingsCsvContent += `"${building.buildingWKT}",Building ${index + 1},SA: ${parseInt(building.clusterId) + 1}\n`;
         });
 
         downloadCsv(clusterCsvContent, 'service_area_&_delivery_units.csv');
@@ -1319,9 +1344,9 @@
                     getBounds: () => L.latLngBounds(latLngs)
                 };
 
-                addOrUpdatePolygon(mockLayer);
                 showToast("OA loaded from CSV!", "success", 2000, "#4CAF50");
                 document.getElementById("uploaded-file-name").innerText = file.name;
+                addOrUpdatePolygon(mockLayer);
             } catch (error) {
                 showToast(`Error: ${error.message}`, "error", 3000, "#FF0000");
                 document.getElementById("uploaded-file-name").innerText = 'No File Chosen';
@@ -1338,6 +1363,7 @@
             showToast(message, "warning", 3000, "#FFA500");
             enableOrDisableHtmlAttribute("run-clustering", false);
             enableOrDisableHtmlAttribute("clear-oa", false);
+            enableOrDisableHtmlAttribute("downloadOaWkt", false);
         };
 
         if (clusteringType === "bottomUp" && !pinLatLng) {
@@ -1353,12 +1379,12 @@
         return true;
     }
 
-    function fetchData(polygon, pinLatLng) {
-        clearClusters();
+    function fetchData(polygon, pinLatLng, fetchClusters) {
+        clearClusters(!fetchClusters);
         enableOrDisableHtmlAttribute("clear-clusters", true);
         enableOrDisableHtmlAttribute("run-clustering", true);
         enableOrDisableHtmlAttribute("clear-oa", true);
-        resetFields();
+        enableOrDisableHtmlAttribute("downloadOaWkt", true);
         enableOrDisableHtmlAttribute("download-csv", !gridsDataExists);
         enableOrDisableHtmlAttribute("download-csv-commcare", !gridsDataExists);
 
@@ -1384,7 +1410,8 @@
             noOfClusters,
             noOfBuildings,
             gridLength,
-            thresholdVal
+            thresholdVal,
+            fetchClusters
         };
 
         showToast('Fetching data...', 'info', undefined, '#ff9300');
@@ -1395,8 +1422,11 @@
             body: JSON.stringify(requestBody)
         })
             .then(response => {
-                enableOrDisableHtmlAttribute("clear-clusters", false);
+                if(fetchClusters) {
+                    enableOrDisableHtmlAttribute("clear-clusters", false);
+                }
                 enableOrDisableHtmlAttribute("clear-oa", false);
+                enableOrDisableHtmlAttribute("downloadOaWkt", false);
                 enableOrDisableHtmlAttribute("run-clustering", false);
                 return response.json();
             })
@@ -1407,10 +1437,13 @@
                 } else {
                     showToast('Data loaded!', 'success', 2000, '#4CAF50');
                     document.getElementById('building-count').innerText = data.building_count ?? "Error fetching data";
+                    if(data.building_count == 0) showToast(`No Buildings in the OA`, 'error', 5000, '#FF0000', '300px')
                     lastFetchedData = data;
                     addBuildings(data);
-                    addClusters(data, true);
-                    enableOrDisableHtmlAttribute("get-grids", false);
+                    if(fetchClusters) {
+                        addClusters(data, true);
+                        enableOrDisableHtmlAttribute("get-grids", false);
+                    }
                 }
             })
             .catch(error => {
@@ -1420,10 +1453,34 @@
                 document.getElementById('building-count').innerText = "Error fetching data";
                 enableOrDisableHtmlAttribute("clear-clusters", false);
                 enableOrDisableHtmlAttribute("clear-oa", false);
+                enableOrDisableHtmlAttribute("downloadOaWkt", false);
             });
     }
 
     toggleInputFields();
+
+    function downloadOAWkt() {
+        // Check if there is a polygon drawn (oaLangLats exists and has coordinates)
+        if (!oaLangLats || oaLangLats.length === 0) {
+            showToast("No OA drawn to download.", "warning", 3000, "#FFA500");
+            return;
+        }
+
+        // Convert oaLangLats to WKT format
+        // oaLangLats is an array of [lng, lat] pairs, we need to convert to "lng lat" strings
+        const coordsStr = oaLangLats.map(coord => `${coord[0]} ${coord[1]}`).join(', ');
+        // Close the polygon by using only the coordinates (no extra duplicate at the end)
+        const wkt = `POLYGON ((${coordsStr}))`;
+
+        // Create CSV content with header and single row
+        const csvContent = `OA Wkt\n"${wkt}"`;
+
+        // Use existing downloadCsv function to download the file
+        downloadCsv(csvContent, 'oa_wkt.csv');
+        
+        // Show success message
+        showToast("OA WKT downloaded!", "success", 2000, "#4CAF50");
+    }
 </script>
 </body>
 </html>
