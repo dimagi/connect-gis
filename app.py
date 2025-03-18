@@ -526,14 +526,14 @@ def handle_bottom_up_clustering(data, no_of_clusters, no_of_buildings, tolerance
     total_buildings_needed = no_of_clusters * no_of_buildings
 
     # Fetch buildings within tolerance
-    buildings_geojson, coordinates = getBuildingsAroundPin(pin_lng, pin_lat, total_buildings_needed, tolerance)
+    buildings_geojson, coordinates = getBuildingsAroundPin(pin_lng, pin_lat, total_buildings_needed, 0)
     buildings_count = len(coordinates)
 
     # Validate building count against the tolerance
     min_buildings = int(total_buildings_needed * (1 - tolerance))
     if buildings_count < min_buildings:
         return jsonify({
-            "error": f"Insufficient buildings ({buildings_count}) found; at least {min_buildings} required within tolerance"
+            "error": f"Insufficient buildings ({buildings_count}) found; at least {min_buildings} required"
         }), 400
 
     # Recalculate the number of clusters if needed
@@ -545,7 +545,7 @@ def handle_bottom_up_clustering(data, no_of_clusters, no_of_buildings, tolerance
 
     # Perform clustering
     clusters = optimized_balanced_kmeans_constrained_with_no_of_clusters(
-        buildings_geojson, coordinates, no_of_clusters, 0
+        buildings_geojson, coordinates, no_of_clusters, tolerance
     )
 
     return jsonify({
