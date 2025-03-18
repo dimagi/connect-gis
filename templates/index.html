@@ -1385,8 +1385,8 @@
                 };
 
                 showToast("OA loaded from CSV!", "success", 2000, "#4CAF50");
-                document.getElementById("uploaded-file-name").innerText = file.name;
                 addOrUpdatePolygon(mockLayer);
+                document.getElementById("uploaded-file-name").innerText = file.name;
             } catch (error) {
                 showToast(`Error: ${error.message}`, "error", 3000, "#FF0000");
                 document.getElementById("uploaded-file-name").innerText = 'No File Chosen';
