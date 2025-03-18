@@ -537,15 +537,15 @@ def handle_bottom_up_clustering(data, no_of_clusters, no_of_buildings, tolerance
         }), 400
 
     # Recalculate the number of clusters if needed
-    no_of_clusters = max(1, buildings_count // no_of_buildings)
-    if no_of_clusters == 0:
-        return jsonify({
-            "error": f"Insufficient buildings ({buildings_count}) for even one cluster of {no_of_buildings}"
-        }), 400
+    # no_of_clusters = max(1, buildings_count // no_of_buildings)
+    # if no_of_clusters == 0:
+    #     return jsonify({
+    #         "error": f"Insufficient buildings ({buildings_count}) for even one cluster of {no_of_buildings}"
+    #     }), 400
 
     # Perform clustering
     clusters = optimized_balanced_kmeans_constrained_with_no_of_clusters(
-        buildings_geojson, coordinates, no_of_clusters, tolerance
+        buildings_geojson, coordinates, no_of_clusters, 0
     )
 
     return jsonify({
