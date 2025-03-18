@@ -1249,6 +1249,7 @@
 
         downloadCsv(clusterCsvContent, 'service_area_&_delivery_units.csv');
         downloadCsv(buildingsCsvContent, 'buildings.csv');
+        downloadOAWkt();
         showToast("CSV downloaded! Import into Google My Maps at mymaps.google.com.", "success", 3000, "#00FF00");
     }
 
@@ -1281,6 +1282,7 @@
         });
 
         downloadCsv(csvContent, 'csv_for_CommCare.csv');
+        downloadOAWkt();
         showToast("CommCare CSV downloaded!", "success", 3000, "#00FF00");
     }
 
