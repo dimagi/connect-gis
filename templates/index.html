@@ -527,7 +527,7 @@
         const noOfBuildingsIP = document.getElementById("noOfBuildingsIP");
         const thresholdValueIP = document.getElementById("thresholdValueIP");
         const gridLengthIP = document.getElementById("gridLengthIP");
-
+        const noOfBuildingsLabel = noOfBuildingsIP.querySelector("label[for='noOfBuildings']");
         // Reset all to hidden
         noOfClustersIP.style.display = "none";
         noOfBuildingsIP.style.display = "none";
@@ -537,11 +537,14 @@
         // Show relevant fields based on method
         if (method === "kMeans") {
             noOfClustersIP.style.display = "block";
+            noOfBuildingsLabel.innerText = "No of Buildings:";
         } else if (method === "balancedKMeans") {
             noOfBuildingsIP.style.display = "block";
+            noOfBuildingsLabel.innerText = "No of buildings:";
         } else if (method === "bottomUp") {
             noOfClustersIP.style.display = "block";
             noOfBuildingsIP.style.display = "block";
+            noOfBuildingsLabel.innerText = "No of buildings per SA:";
         }
         document.getElementById('close-grid-details').addEventListener('click', () => reSizeMap(mapDefaultHeight, true));
     }
