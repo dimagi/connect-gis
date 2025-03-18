@@ -788,7 +788,7 @@
 
         const assignedBuildingIndices = new Set();
         turf.featureEach(grid, (currentGrid, gridIndex) => {
-            const buildingsInGrid = getBuildingsInGrid(allBuildings, currentGrid, assignedBuildingIndices);
+            const buildingsInGrid = getBuildingsInGrid(allBuildings, currentGrid, assignedBuildingIndices, drawnGrids.length + 1);
             const majorityCluster = findMajorityCluster(currentGrid, boundaries);
             if (!majorityCluster) return;
 
@@ -808,7 +808,8 @@
                     weight: hasBuildings ? 1 : 0,
                     fillOpacity: hasBuildings ? 0.4 : 0,
                     opacity: hasBuildings ? 1 : 0
-                }
+                },
+                clusterId: majorityCluster
             });
 
             // Dynamically fetch building count from processedData.clusters
@@ -902,7 +903,8 @@
                 const clusterLabel = data.clusters[index]?.cluster ?? "Unassigned";
                 processedData.buildings.push({
                     buildingWKT: wkt,
-                    clusterId: clusterLabel
+                    clusterId: clusterLabel,
+                    properties: feature.properties
                 });
             }
         });
@@ -1174,11 +1176,13 @@
         return [bbox[0] - buffer, bbox[1] - buffer, bbox[2] + buffer, bbox[3] + buffer];
     }
 
-    function getBuildingsInGrid(allBuildings, grid, assignedBuildingIndices) {
+    function getBuildingsInGrid(allBuildings, grid, assignedBuildingIndices, gridIndex) {
         return turf.featureCollection(
                 allBuildings.features.filter((point, buildingIndex) => {
                     if (turf.booleanPointInPolygon(point, grid)) {
                         assignedBuildingIndices.add(buildingIndex);
+                        const buildingFeature = data.buildings.features[buildingIndex];
+                        buildingFeature.properties.grid_label = gridIndex;
                         return true;
                     }
                     return false;
@@ -1273,9 +1277,9 @@
         });
 
         // Export buildings
-        let buildingsCsvContent = "WKT,name,description\n";
+        let buildingsCsvContent = "Name,SA,DU,latitude,longitude,area_in_meters,confidence,geometry,full_plus_code\n";
         processedData.buildings.forEach((building, index) => {
-            buildingsCsvContent += `"${building.buildingWKT}",Building ${index + 1},SA: ${parseInt(building.clusterId) + 1}\n`;
+            buildingsCsvContent += `Building ${index + 1}, ${parseInt(building.clusterId) + 1}, ${building.properties.grid_label}, ${building.properties.longitude_latitude.coordinates[0]}, ${building.properties.longitude_latitude.coordinates[1]}, ${building.properties.area_in_meters}, ${building.properties.confidence},"${building.buildingWKT}", ${building.properties.full_plus_code}\n`;
         });
 
         downloadCsv(clusterCsvContent, 'service_area_&_delivery_units.csv');
