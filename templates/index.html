@@ -130,6 +130,36 @@
         .card-text {
             margin-bottom: 2px !important 
         }
+        .download-container {
+            position: relative;
+        }
+
+        .download-menu {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            width: 100%;
+        }
+
+        .download-option {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            border: none;
+            background: #fff;
+            text-align: left;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .download-option:hover {
+            background: #f0f0f0;
+        }
 
     </style>
 </head>
@@ -247,13 +277,14 @@
                                 <button class="btn btn-danger w-100" onclick="clearOA()" id="clear-oa" disabled>Clear Map</button>
                             </div>
                             <div class="col-6">
-                                <button class="btn btn-primary w-100" onclick="downloadOAWkt()" id="downloadOaWkt" disabled>Download OA WKT</button>
-                            </div>
-                            <div class="col-6">
-                                <button class="btn btn-primary w-100" onclick="downloadGmapData()" id="download-csv" disabled>Download CSV For My Maps</button>
-                            </div>
-                            <div class="col-6">
-                                <button class="btn btn-primary w-100" onclick="downloadCsvForCommCare()" id="download-csv-commcare" disabled>Download CSV For CommCare</button>
+                                <div class="download-container">
+                                    <button class="btn btn-primary w-100" id="download-btn" disabled>Download <span>▼</span></button>
+                                    <div id="download-menu" class="download-menu" style="display: none;">
+                                        <button id="download-oa-wkt" class="download-option">Download OA WKT</button>
+                                        <button id="download-csv-my-maps" class="download-option">Download CSV for My Maps</button>
+                                        <button id="download-csv-commcare" class="download-option">Download CSV for CommCare</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -383,26 +414,38 @@
                 $('#total-building-count').text(totalBuildingCount ?? 0);
                 enableOrDisableHtmlAttribute("run-clustering", false);
                 enableOrDisableHtmlAttribute("clear-oa", false);
-                enableOrDisableHtmlAttribute("downloadOaWkt", false);
                 enableOrDisableHtmlAttribute("get-grids", selectedPolygon.clustersData ? false : true);
                 enableOrDisableHtmlAttribute("clear-clusters", selectedPolygon.clustersData ? false : true);
                 enableOrDisableHtmlAttribute("clear-grids", selectedPolygon.gridsDataExists ? false : true);
-                enableOrDisableHtmlAttribute("download-csv", !selectedPolygon.gridsDataExists);
-                enableOrDisableHtmlAttribute("download-csv-commcare", !selectedPolygon.gridsDataExists);
+
+                // Simplified enabling/disabling logic for download options
+                const polygonExists = true; // A polygon is selected
+                const gridsExist = selectedPolygon.gridsDataExists;
+
+                // Enable "Download OA WKT" if a polygon exists
+                enableOrDisableHtmlAttribute("download-oa-wkt", !polygonExists);
+                // Enable CSV downloads only if grids are drawn
+                enableOrDisableHtmlAttribute("download-csv-my-maps", !gridsExist);
+                enableOrDisableHtmlAttribute("download-csv-commcare", !gridsExist);
+                // Enable the "Download" button if any option is available (i.e., if a polygon exists)
+                enableOrDisableHtmlAttribute("download-btn", !polygonExists);
             } else {
                 $('#building-count').text(0);
                 $('#cluster-count-val').text(0);
                 $('#total-building-count').text(0);
                 enableOrDisableHtmlAttribute("run-clustering", true);
                 enableOrDisableHtmlAttribute("clear-oa", true);
-                enableOrDisableHtmlAttribute("downloadOaWkt", true);
                 enableOrDisableHtmlAttribute("get-grids", true);
                 enableOrDisableHtmlAttribute("clear-clusters", true);
                 enableOrDisableHtmlAttribute("clear-grids", true);
-                enableOrDisableHtmlAttribute("download-csv", true);
+
+                // Disable all download options and the "Download" button
+                enableOrDisableHtmlAttribute("download-oa-wkt", true);
+                enableOrDisableHtmlAttribute("download-csv-my-maps", true);
                 enableOrDisableHtmlAttribute("download-csv-commcare", true);
+                enableOrDisableHtmlAttribute("download-btn", true);
             }
-            highlightSelectedPolygon()
+            highlightSelectedPolygon();
         }
 
         function highlightSelectedPolygon() {
@@ -552,7 +595,10 @@
             enableOrDisableHtmlAttribute("run-clustering", true);
             enableOrDisableHtmlAttribute("get-grids", true);
             enableOrDisableHtmlAttribute("clear-oa", true);
-            enableOrDisableHtmlAttribute("downloadOaWkt", true);
+            enableOrDisableHtmlAttribute("download-oa-wkt", true);
+            enableOrDisableHtmlAttribute("download-csv-my-maps", true);
+            enableOrDisableHtmlAttribute("download-csv-commcare", true);
+            enableOrDisableHtmlAttribute("download-btn", true);
             $('#uploaded-file-name').text('No File Chosen');
             updatePolygonDropdown();
             selectedPolygonIndex = -1;
@@ -581,8 +627,10 @@
             polygonData.densityLayer.clearLayers();
             polygonData.gridsDataExists = false;
             enableOrDisableHtmlAttribute("clear-grids", true);
-            enableOrDisableHtmlAttribute("download-csv", true);
+            enableOrDisableHtmlAttribute("download-csv-my-maps", true);
             enableOrDisableHtmlAttribute("download-csv-commcare", true);
+            enableOrDisableHtmlAttribute("download-oa-wkt", false);
+            enableOrDisableHtmlAttribute("download-btn", false);
             $('#grid-details').attr('hidden', true);
             polygonData.processedData = { clusters: new Map(), grids: new Map(), buildings: new Map() };
             reSizeMap(mapDefaultHeight, true);
@@ -941,7 +989,7 @@
             polygonData.gridsDataExists = true
             // Update buttons
             enableOrDisableHtmlAttribute("clear-grids", false);
-            enableOrDisableHtmlAttribute("download-csv", false);
+            enableOrDisableHtmlAttribute("download-csv-my-maps", false);
             enableOrDisableHtmlAttribute("download-csv-commcare", false);
 
         }
@@ -1482,7 +1530,8 @@
                         enableOrDisableHtmlAttribute("clear-clusters", false);
                     }
                     enableOrDisableHtmlAttribute("clear-oa", false);
-                    enableOrDisableHtmlAttribute("downloadOaWkt", false);
+                    enableOrDisableHtmlAttribute("download-oa-wkt", false);
+                    enableOrDisableHtmlAttribute("download-btn", false);
                     enableOrDisableHtmlAttribute("run-clustering", false);
                     return response.json();
                 })
@@ -1512,7 +1561,8 @@
                     $('#building-count').text("Error fetching data");
                     enableOrDisableHtmlAttribute("clear-clusters", false);
                     enableOrDisableHtmlAttribute("clear-oa", false);
-                    enableOrDisableHtmlAttribute("downloadOaWkt", false);
+                    enableOrDisableHtmlAttribute("download-oa-wkt", false);
+                    enableOrDisableHtmlAttribute("download-btn", false);
                 });
         }
 
@@ -1591,6 +1641,44 @@
             } else {
                 showToast("Please select a polygon.", "warning", 3000, "#FFA500");
             }
+        });
+        // Dropdown menu for Download button
+        const downloadBtn = document.getElementById('download-btn');
+        const downloadMenu = document.getElementById('download-menu');
+
+        // Toggle dropdown menu on click
+        downloadBtn.addEventListener('click', () => {
+            if (!downloadBtn.disabled) {
+                downloadMenu.style.display = downloadMenu.style.display === 'block' ? 'none' : 'block';
+                downloadBtn.setAttribute('aria-expanded', downloadMenu.style.display === 'block' ? 'true' : 'false');
+            }
+        });
+
+        // Hide dropdown when clicking outside
+        document.addEventListener('click', (event) => {
+            if (!downloadBtn.contains(event.target) && !downloadMenu.contains(event.target)) {
+                downloadMenu.style.display = 'none';
+                downloadBtn.setAttribute('aria-expanded', 'false');
+            }
+        });
+
+        // Handle download options
+        document.getElementById('download-oa-wkt').addEventListener('click', () => {
+            downloadMenu.style.display = 'none';
+            downloadBtn.setAttribute('aria-expanded', 'false');
+            downloadOAWkt();
+        });
+
+        document.getElementById('download-csv-my-maps').addEventListener('click', () => {
+            downloadMenu.style.display = 'none';
+            downloadBtn.setAttribute('aria-expanded', 'false');
+            downloadGmapData();
+        });
+
+        document.getElementById('download-csv-commcare').addEventListener('click', () => {
+            downloadMenu.style.display = 'none';
+            downloadBtn.setAttribute('aria-expanded', 'false');
+            downloadCsvForCommCare();
         });
     </script>
 </body>
