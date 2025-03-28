@@ -323,7 +323,7 @@ def getBuildingsDataFromDB(polygon_coords):
             "properties": {
                 "id": str(row['id']),
                 "area_in_meters": row['area_in_meters'],
-                "confidence": row['confidence'],
+                "confidence": row['confidence'] if row['confidence'] is not None else 0,
                 "record_id": row['record_id'],
                 # Add longitude_latitude to match the GEE format expected by clustering
                 "longitude_latitude": {
