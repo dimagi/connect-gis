@@ -230,6 +230,13 @@
                     <div class="card-body">
                         <h5 class="card-title">Clustering Settings</h5>
                         <div class="mb-3">
+                            <label for="DBtype" class="form-label">Fetch Buildings From:</label>
+                            <select class="form-select" id="DBtype">
+                                <option value="GEE">Google Earth Engine (GEE)</option>
+                                <option value="psql">Postgres Data Base</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
                             <label for="clusteringType" class="form-label">Select Service Area Grouping Method:</label>
                             <select class="form-select" id="clusteringType" onchange="toggleInputFields()">
                                 <option value="kMeans">K-Means Clustering</option>
@@ -271,7 +278,7 @@
                                 <button class="btn btn-success w-100" id="get-grids" disabled>Get Delivery Units</button>
                             </div>
                             <div class="col-6">
-                                <button class="btn btn-warning w-100" addClusters(lastFetchedData, true)" id="clear-grids" disabled>Clear Delivery Units</button>
+                                <button class="btn btn-warning w-100" addClusters(lastFetchedData, true) id="clear-grids" disabled>Clear Delivery Units</button>
                             </div>
                             <div class="col-6">
                                 <button class="btn btn-danger w-100" onclick="clearOA()" id="clear-oa" disabled>Clear Map</button>
@@ -1497,6 +1504,7 @@
             if (thresholdVal > 100) thresholdVal = 100;
             if (thresholdVal < 0) thresholdVal = 0;
             const clusteringType = $('#clusteringType').val();
+            const dbType = $('#DBtype').val()
             let noOfClusters = $('#noOfClusters').val();
             if (noOfClusters <= 0) noOfClusters = 1;
             let noOfBuildings = $('#noOfBuildings').val();
@@ -1515,7 +1523,8 @@
                 noOfBuildings,
                 gridLength,
                 thresholdVal,
-                fetchClusters
+                fetchClusters,
+                dbType
             };
 
             showToast('Fetching data...', 'info', undefined, '#ff9300');

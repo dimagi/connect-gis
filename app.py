@@ -1,18 +1,21 @@
-from flask import Flask, request, jsonify, render_template
-from flask_cors import CORS
-import numpy as np
-import pandas as pd
-from sklearn.cluster import AgglomerativeClustering, KMeans, DBSCAN
-from scipy.cluster.hierarchy import linkage, fcluster
-import ee
-from collections import Counter
-from sklearn.metrics import pairwise_distances
+import logging
 import os
-from sklearn.neighbors import NearestNeighbors
-from k_means_constrained import KMeansConstrained
-import math
+from collections import Counter
+
+import ee
 import geopandas as gpd
+from flask import Flask, request, render_template
+from flask_cors import CORS
+from k_means_constrained import KMeansConstrained
+from scipy.cluster.hierarchy import linkage, fcluster
 from shapely.geometry import Polygon
+from sklearn.cluster import AgglomerativeClustering, KMeans, DBSCAN
+from sqlalchemy import create_engine
+
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -35,77 +38,20 @@ try:
 except Exception as e:
     print(f"Error initializing Earth Engine: {e}")
 
+# Fetch database connection parameters from environment variables
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "pwd")
+DB_HOST = os.getenv("DB_HOST", "host")
+DB_PORT = os.getenv("DB_PORT", "5423")
+DB_NAME = os.getenv("DB_NAME", "db")
+
+DB_CONNECTION_STRING = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
+engine = create_engine(DB_CONNECTION_STRING)
 
 @app.route("/")
 def home():
     return render_template("index.html")
-
-
-def create_grid_in_cluster(gdf, cluster_num, grid_size=15):
-    """
-    Create a 15m x 15m grid within a cluster, only for cells containing buildings.
-
-    Parameters:
-    - gdf: GeoDataFrame with 'cluster' column and geometry
-    - cluster_num: Integer, the cluster number to grid
-    - grid_size: Float, size of grid cells in meters (default: 15)
-
-    Returns:
-    - GeoDataFrame with grid polygons containing buildings
-    """
-    # Filter buildings in the specified cluster
-    cluster_gdf = gdf[gdf['cluster'] == cluster_num]
-
-    # Get the bounding box of the cluster
-    bounds = cluster_gdf.total_bounds  # [minx, miny, maxx, maxy]
-    minx, miny, maxx, maxy = bounds
-
-    # Adjust bounds to align with grid_size
-    minx = np.floor(minx / grid_size) * grid_size
-    miny = np.floor(miny / grid_size) * grid_size
-    maxx = np.ceil(maxx / grid_size) * grid_size
-    maxy = np.ceil(maxy / grid_size) * grid_size
-
-    # Generate grid coordinates
-    x_coords = np.arange(minx, maxx + grid_size, grid_size)
-    y_coords = np.arange(miny, maxy + grid_size, grid_size)
-
-    # Create grid polygons and filter those with buildings
-    grid_polygons = []
-    for x in x_coords[:-1]:
-        for y in y_coords[:-1]:
-            square = Polygon([
-                (x, y),
-                (x + grid_size, y),
-                (x + grid_size, y + grid_size),
-                (x, y + grid_size)
-            ])
-            # Check if any building intersects this grid cell
-            if cluster_gdf.intersects(square).any():
-                grid_polygons.append(square)
-
-    # Create a GeoDataFrame for the grid
-    if not grid_polygons:  # Handle case with no valid grids
-        return gpd.GeoDataFrame({'geometry': [], 'cluster': []}, crs=gdf.crs)
-    grid_gdf = gpd.GeoDataFrame({'geometry': grid_polygons, 'cluster': cluster_num}, crs=gdf.crs)
-    return grid_gdf
-
-
-def add_grids_to_clusters(buildingsGDF, grid_size=15):
-    """
-    Add 15m grids to all clusters, only where buildings exist.
-
-    Parameters:
-    - buildingsGDF: GeoDataFrame with 'cluster' column
-    - grid_size: Float, size of grid cells in meters (default: 15)
-
-    Returns:
-    - GeoDataFrame with grid polygons for all clusters
-    """
-    unique_clusters = buildingsGDF['cluster'].unique()
-    grid_gdfs = [create_grid_in_cluster(buildingsGDF, cluster, grid_size) for cluster in unique_clusters]
-    return gpd.GeoDataFrame(pd.concat(grid_gdfs, ignore_index=True), crs=buildingsGDF.crs)
-
 
 def _calculate_cluster_sizes(n_samples, num_clusters, balance_tolerance=0.05):
     base_size = math.ceil(n_samples / num_clusters)
@@ -301,83 +247,10 @@ def cluster_buildings_kMeans(buildingsGDF, coords, num_clusters=3):
     cluster_labels = kmeans.fit_predict(coords)
     return getClusters(buildingsGDF, coords, cluster_labels)
 
-
-def getGridsFromGEE(region, filtered_buildings, grid_size=50):
-    grid = ee.FeatureCollection(region.coveringGrid('EPSG:4326', grid_size))  # Ensure it's a FeatureCollection
-
-    density_zones = grid.map(
-        lambda cell: ee.Feature(cell).set("count", filtered_buildings.filterBounds(cell.geometry()).size()))
-
-    # Convert to GeoJSON
-    try:
-        density_zones_geojson = density_zones.getInfo()
-    except ee.EEException as e:
-        raise Exception(
-            "Too many elements: The area contains more than 5000 buildings or grid cells. Please reduce the polygon size.")
-
-    density_features = []
-    for feature in density_zones_geojson["features"]:
-        if feature["properties"]["count"] > 0:
-            density_features.append({
-                "type": "Feature",
-                "geometry": feature["geometry"],
-                "properties": {"count": feature["properties"]["count"]}
-            })
-    return density_features
-
-
-def getGrids(region, filtered_buildings, grid_size=50):
-    """
-    Generate 50m x 50m grids with building counts within a region, optimized for speed.
-
-    Args:
-        region (ee.Geometry): The polygon area to analyze.
-        filtered_buildings (ee.FeatureCollection): Buildings within the region.
-        grid_size (float, optional): Grid cell size in meters. Defaults to 50.
-
-    Returns:
-        list: GeoJSON features with grid geometry (EPSG:4326) and building counts.
-
-    Raises:
-        ee.EEException: If Earth Engine fails to process or retrieve grid data.
-    """
-    # Get centroid and determine UTM CRS
-    centroid = region.centroid().coordinates().getInfo()
-    utm_zone = int((centroid[0] + 180) / 6) + 1
-    utm_crs = f'EPSG:326{utm_zone:02d}' if centroid[1] >= 0 else f'EPSG:327{utm_zone:02d}'
-
-    # Create grid from building centroids in UTM
-    grid_cells = filtered_buildings.map(lambda f: f.centroid()).geometry().coveringGrid(utm_crs, grid_size)
-
-    # Count buildings and filter occupied cells, transform to EPSG:4326 in one map
-    density_cells = grid_cells.map(
-        lambda cell: cell.set(
-            "count",
-            filtered_buildings.filterBounds(cell.geometry()).size()
-        )
-    ).filter(ee.Filter.gt('count', 0)).map(
-        lambda feature: feature.setGeometry(feature.geometry().transform('EPSG:4326', 1))
-    )
-
-    # Convert to GeoJSON and format features
-    try:
-        geojson_data = density_cells.getInfo()
-        return [
-            {
-                "type": "Feature",
-                "geometry": feature["geometry"],
-                "properties": {"count": feature["properties"]["count"]}
-            }
-            for feature in geojson_data["features"]
-        ]
-    except ee.EEException as e:
-        raise ee.EEException(f"Failed to convert grids to GeoJSON: {str(e)}")
-
-
-def getBuildingsData(polygon_coords):
+def getBuildingsDataFromGEE(polygon_coords):
     if not polygon_coords:
         return jsonify({"error": "Invalid polygon coordinates"}), 400
-
+    
     # Create EE Polygon geometry
     region = ee.Geometry.Polygon(polygon_coords)
     # Filter buildings inside the polygon
@@ -390,6 +263,85 @@ def getBuildingsData(polygon_coords):
     return buildings_geojson
 
 
+def getBuildingsDataFromDB(polygon_coords):
+    """
+    Fetch buildings from the nigeria table within the specified polygon.
+
+    Args:
+        polygon_coords (list): List of [lng, lat] coordinates defining the polygon.
+
+    Returns:
+        dict: GeoJSON FeatureCollection with building features.
+    """
+    if not polygon_coords:
+        raise ValueError("Invalid polygon coordinates")
+
+    # Create a Shapely Polygon from the coordinates
+    # polygon_coords should be a list of [lng, lat] pairs, e.g., [[lng1, lat1], [lng2, lat2], ...]
+    # polygon_coords should be a list of [lng, lat] pairs, e.g., [[lng1, lat1], [lng2, lat2], ...]
+    polygon = Polygon(polygon_coords)
+
+    # Convert the polygon to WKT for use in the SQL query
+    polygon_wkt = polygon.wkt
+
+    # Query the nigeria table for buildings within the polygon
+    query = f"""
+    SELECT
+        id,
+        latitude,
+        longitude,
+        area_in_meters,
+        confidence,
+        record_id,
+        geometry
+    FROM buildings
+    WHERE ST_Within(geometry, ST_GeomFromText('{polygon_wkt}', 4326));
+    """
+
+    # Execute the query and load into a GeoDataFrame
+    try:
+        gdf = gpd.read_postgis(query, engine, geom_col='geometry')
+        print("Successfully loaded data from nigeria table into GeoDataFrame.")
+    except Exception as e:
+        print("Error loading data from nigeria table:")
+        print(e)
+
+    if gdf.empty:
+        return {"type": "FeatureCollection", "features": []}
+
+    # Convert the GeoDataFrame to a GeoJSON FeatureCollection
+    # Format the features to match the expected structure for clustering
+    features = []
+    for _, row in gdf.iterrows():
+        # Convert the geometry (MULTIPOLYGON) to GeoJSON format
+        geometry = row['geometry'].__geo_interface__
+
+        # Create a feature with properties matching the GEE format
+        feature = {
+            "type": "Feature",
+            "geometry": geometry,
+            "properties": {
+                "id": str(row['id']),
+                "area_in_meters": row['area_in_meters'],
+                "confidence": row['confidence'],
+                "record_id": row['record_id'],
+                # Add longitude_latitude to match the GEE format expected by clustering
+                "longitude_latitude": {
+                    "type": "Point",
+                    "coordinates": [row['longitude'], row['latitude']]
+                }
+            }
+        }
+        features.append(feature)
+
+    buildings_geojson = {
+        "type": "FeatureCollection",
+        "features": features
+    }
+
+    return buildings_geojson
+
+
 @app.route('/get_building_density', methods=['POST'])
 def get_building_density():
     try:
@@ -399,11 +351,12 @@ def get_building_density():
         no_of_buildings = int(data.get("noOfBuildings", 250))
         tolerance = float(data.get("thresholdVal", 10)) / 100  # Percentage to decimal
         fetchClusters = bool(data.get("fetchClusters", False))
+        dbType = data.get("dbType")
 
         if clustering_type == "bottomUp":
             return handle_bottom_up_clustering(data, no_of_clusters, no_of_buildings, tolerance)
         else:
-            return handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of_buildings, tolerance, fetchClusters)
+            return handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of_buildings, tolerance, fetchClusters, dbType)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 400
@@ -555,13 +508,18 @@ def handle_bottom_up_clustering(data, no_of_clusters, no_of_buildings, tolerance
     })
 
 
-def handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of_buildings, tolerance, fetchClusters):
+def handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of_buildings, tolerance, fetchClusters, dbType):
     polygon_coords = data.get("polygon", [])
     if not polygon_coords:
         return jsonify({"error": "Invalid polygon coordinates"}), 400
 
-    # Fetch buildings within the polygon
-    buildings_geojson = getBuildingsData(polygon_coords)
+    if dbType == 'GEE':
+        buildings_geojson = getBuildingsDataFromGEE(polygon_coords)
+    else:
+        try:
+            buildings_geojson = getBuildingsDataFromDB(polygon_coords)
+        except Exception as e:
+            return jsonify({"error": f"Error fetching buildings from database: {str(e)}"}), 500
     coordinates = [
         feature['properties']['longitude_latitude']['coordinates']
         for feature in buildings_geojson['features']
@@ -600,27 +558,6 @@ def handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of
         "buildings": buildings_geojson,
         "clusters": clusters
     })
-
-
-@app.route('/get_grids', methods=['POST'])
-def getGridsData():
-    data = request.get_json()
-    polygon_coords = data.get("polygon", [])
-    gridSize = int(data.get("gridLength"))
-    if not polygon_coords:
-        return jsonify({"error": "Invalid polygon coordinates"}), 400
-
-    # Create EE Polygon geometry
-    region = ee.Geometry.Polygon(polygon_coords)
-    # Filter buildings inside the polygon
-    filtered_buildings = buildings.filterBounds(region)
-
-    try:
-        grids = getGrids(region, filtered_buildings, gridSize)
-        return jsonify({"grids": grids})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
-
 
 # Run the Flask app
 if __name__ == '__main__':
