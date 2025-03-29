@@ -10,3 +10,4 @@ pandas==2.2.0
 geopandas==0.14.3
 SQLAlchemy
 shapely==2.0.3
+psycopg2-binary
