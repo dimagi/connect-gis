@@ -1,24 +1,15 @@
-from flask import Flask, request, jsonify, render_template
-from flask_cors import CORS
-import numpy as np
-import pandas as pd
-from sklearn.cluster import AgglomerativeClustering, KMeans, DBSCAN
-from scipy.cluster.hierarchy import linkage, fcluster
-import ee
-from collections import Counter
-from sklearn.metrics import pairwise_distances
 import os
-from sklearn.neighbors import NearestNeighbors
-from k_means_constrained import KMeansConstrained
-import math
-import geopandas as gpd
-from shapely.geometry import Polygon
-from sqlalchemy import create_engine
-import logging
+from collections import Counter
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+import ee
+import geopandas as gpd
+from flask import Flask, request, render_template
+from flask_cors import CORS
+from k_means_constrained import KMeansConstrained
+from scipy.cluster.hierarchy import linkage, fcluster
+from shapely.geometry import Polygon
+from sklearn.cluster import AgglomerativeClustering, KMeans, DBSCAN
+from sqlalchemy import create_engine
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
