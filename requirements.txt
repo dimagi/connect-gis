@@ -11,3 +11,4 @@ geopandas==0.14.3
 shapely==2.0.3
 SQLAlchemy
 psycopg2-binary
+geojson

@@ -10,6 +10,8 @@ from scipy.cluster.hierarchy import linkage, fcluster
 from shapely.geometry import Polygon
 from sklearn.cluster import AgglomerativeClustering, KMeans, DBSCAN
 from sqlalchemy import create_engine
+from geojson import Feature, FeatureCollection, Point
+import json
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -257,7 +259,7 @@ def getBuildingsDataFromGEE(polygon_coords):
     return buildings_geojson
 
 
-def getBuildingsDataFromDB(polygon_coords):
+def getBuildingsDataFromDB1(polygon_coords):
     """
     Fetch buildings from the nigeria table within the specified polygon.
 
@@ -288,7 +290,7 @@ def getBuildingsDataFromDB(polygon_coords):
         confidence,
         record_id,
         geometry
-    FROM buildings
+    FROM buildings_1
     WHERE ST_Within(geometry, ST_GeomFromText('{polygon_wkt}', 4326));
     """
 
@@ -334,6 +336,79 @@ def getBuildingsDataFromDB(polygon_coords):
     }
 
     return buildings_geojson
+
+def getBuildingsDataFromDB(polygon_coords):
+    """
+    Fetch buildings from the nigeria table within the specified polygon, streaming results to avoid memory issues.
+
+    Args:
+        polygon_coords (list): List of [lng, lat] coordinates defining the polygon.
+
+    Returns:
+        dict: GeoJSON FeatureCollection with building features.
+    """
+    if not polygon_coords:
+        raise ValueError("Invalid polygon coordinates")
+
+    # Create a Shapely Polygon from the coordinates
+    polygon = Polygon(polygon_coords)
+    polygon_wkt = polygon.wkt
+
+    # SQL query with ST_AsGeoJSON to offload geometry conversion to the database
+    query = """
+    SELECT
+        id,
+        latitude,
+        longitude,
+        area_in_meters,
+        confidence,
+        record_id,
+        ST_AsGeoJSON(geometry) as geometry
+    FROM buildings_1
+    WHERE ST_Within(geometry, ST_GeomFromText(%s, 4326));
+    """
+
+    # Use a raw database connection
+    conn = None
+    cur = None
+    try:
+        conn = engine.raw_connection()
+        cur = conn.cursor()
+
+        cur.execute(query, (polygon_wkt,))
+
+        # Stream results and build features
+        features = []
+        for row in cur:  # Fetch rows one-by-one
+            id, latitude, longitude, area_in_meters, confidence, record_id, geom_json = row
+            geometry = json.loads(geom_json)  # Parse the GeoJSON geometry from the database
+
+            # Create a GeoJSON Feature
+            feature = Feature(
+                geometry=geometry,
+                properties={
+                    "id": str(id),
+                    "area_in_meters": area_in_meters,
+                    "confidence": confidence if confidence is not None else 0,
+                    "record_id": record_id,
+                    "longitude_latitude": Point((longitude, latitude))
+                }
+            )
+            features.append(feature)
+
+        # Return as a GeoJSON FeatureCollection
+        return FeatureCollection(features)
+
+    except Exception as e:
+        print(f"Error streaming data from buildings table: {e}")
+        return FeatureCollection([])  # Return empty collection on error
+
+    finally:
+        # Clean up database resources
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
 
 
 @app.route('/get_building_density', methods=['POST'])
