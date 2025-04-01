@@ -258,6 +258,83 @@ def getBuildingsDataFromGEE(polygon_coords):
             "Too many elements: The area contains more than 5000 buildings or grid cells. Please reduce the polygon size.")
     return buildings_geojson
 
+def getBuildingsDataFromDB_streamData(polygon_coords):
+    """
+        Fetch buildings from the buildings table within the specified polygon.
+
+        Args:
+            polygon_coords (list): List of [lng, lat] coordinates defining the polygon.
+
+        Returns:
+            dict: GeoJSON FeatureCollection with building features.
+        """
+    if not polygon_coords:
+        raise ValueError("Invalid polygon coordinates")
+
+    polygon = Polygon(polygon_coords)
+    polygon_wkt = polygon.wkt
+
+    query = """
+        SELECT
+            id,
+            latitude,
+            longitude,
+            area_in_meters,
+            confidence,
+            record_id,
+            ST_AsGeoJSON(geometry) as geometry
+        FROM buildings_1
+        WHERE ST_Within(geometry, ST_GeomFromText(%s, 4326));
+        """
+
+    conn = None
+    cur = None
+    try:
+        conn = engine.raw_connection()
+        cur = conn.cursor()
+        cur.execute(query, (polygon_wkt,))
+
+        # Build features incrementally
+        features = []
+        for row in cur:
+            id, latitude, longitude, area_in_meters, confidence, record_id, geom_json = row
+            geometry = json.loads(geom_json)
+
+            feature = {
+                "type": "Feature",
+                "geometry": geometry,
+                "properties": {
+                    "id": str(id),
+                    "area_in_meters": area_in_meters,
+                    "confidence": confidence if confidence is not None else 0,
+                    "record_id": record_id,
+                    "longitude_latitude": {
+                        "type": "Point",
+                        "coordinates": [longitude, latitude]
+                    }
+                }
+            }
+            features.append(feature)
+
+        # Return as a GeoJSON FeatureCollection dict
+        return {
+            "type": "FeatureCollection",
+            "features": features
+        }
+
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+        return {
+            "type": "FeatureCollection",
+            "features": []
+        }
+
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
 
 def getBuildingsDataFromDB1(polygon_coords):
     """
@@ -586,7 +663,7 @@ def handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of
         buildings_geojson = getBuildingsDataFromGEE(polygon_coords)
     else:
         try:
-            buildings_geojson = getBuildingsDataFromDB(polygon_coords)
+            buildings_geojson = getBuildingsDataFromDB_streamData(polygon_coords)
         except Exception as e:
             return jsonify({"error": f"Error fetching buildings from database: {str(e)}"}), 500
     coordinates = [
