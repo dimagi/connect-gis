@@ -12,6 +12,8 @@ from sklearn.cluster import AgglomerativeClustering, KMeans, DBSCAN
 from sqlalchemy import create_engine
 from geojson import Feature, FeatureCollection, Point
 import json
+from memory_profiler import profile
+import psutil
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -49,6 +51,7 @@ engine = create_engine(DB_CONNECTION_STRING)
 def home():
     return render_template("index.html")
 
+@profile
 def _calculate_cluster_sizes(n_samples, num_clusters, balance_tolerance=0.05):
     base_size = math.ceil(n_samples / num_clusters)
 
@@ -61,7 +64,7 @@ def _calculate_cluster_sizes(n_samples, num_clusters, balance_tolerance=0.05):
 
     return base_size, min_size, max_size
 
-
+@profile
 def _run_constrained_kmeans(coords, num_clusters, min_size, max_size):
     constrained_kmeans = KMeansConstrained(
         n_clusters=num_clusters,
@@ -74,7 +77,7 @@ def _run_constrained_kmeans(coords, num_clusters, min_size, max_size):
     )
     return constrained_kmeans.fit_predict(coords)
 
-
+@profile
 def optimized_balanced_kmeans_constrained_with_buildings_count(buildingsGDF, coords, buildings_per_cluster,
                                                                balance_tolerance=0.05):
     """
@@ -96,7 +99,7 @@ def optimized_balanced_kmeans_constrained_with_buildings_count(buildingsGDF, coo
     labels = _run_constrained_kmeans(coords, num_clusters, min_size, max_size)
     return getClusters(buildingsGDF, coords, labels)
 
-
+@profile
 def optimized_balanced_kmeans_constrained_with_no_of_clusters(buildingsGDF, coords, num_clusters=3,
                                                               balance_tolerance=0.05):
     """
@@ -117,7 +120,7 @@ def optimized_balanced_kmeans_constrained_with_no_of_clusters(buildingsGDF, coor
     labels = _run_constrained_kmeans(coords, num_clusters, min_size, max_size)
     return getClusters(buildingsGDF, coords, labels)
 
-
+@profile
 def balanced_kmeans(buildingsGDF, coords, num_clusters=3):
     n = len(coords)
     # Calculate the ideal size for each cluster
@@ -153,7 +156,7 @@ def balanced_kmeans(buildingsGDF, coords, num_clusters=3):
 
     return getClusters(buildingsGDF, coords, labels)
 
-
+@profile
 def cluster_buildings_with_size(buildingsGDF, coords, max_buildings, thresholdVal=1):
     distance_threshold = np.ptp(coords, axis=0).max() * 0.1
 
@@ -198,7 +201,7 @@ def cluster_buildings_with_size(buildingsGDF, coords, max_buildings, thresholdVa
 
     return getClusters(buildingsGDF, coords, cluster_labels)
 
-
+@profile
 def getClusters(buildingsGDF, coords, cluster_labels):
     cluster_counts = Counter(cluster_labels)
     # Convert the coordinates and their cluster labels into a list of dictionaries
@@ -214,7 +217,7 @@ def getClusters(buildingsGDF, coords, cluster_labels):
 
     return clusters
 
-
+@profile
 def cluster_buildings_dbscan(buildingsGDF, coords, minSamples):
     epsilon = np.ptp(coords, axis=0).max() * 0.02  # 2% of the maximum range
 
@@ -223,7 +226,7 @@ def cluster_buildings_dbscan(buildingsGDF, coords, minSamples):
     clustering = dbscan.fit(coords)
     return getClusters(buildingsGDF, coords, clustering.labels_)
 
-
+@profile
 def cluster_buildings_ward_threshold(buildingsGDF, coords):
     distance_threshold = np.ptp(coords, axis=0).max() * 0.1
     # Perform Hierarchical Clustering with a distance threshold
@@ -231,18 +234,19 @@ def cluster_buildings_ward_threshold(buildingsGDF, coords):
         coords)
     return getClusters(buildingsGDF, coords, clustering.labels_)
 
-
+@profile
 def cluster_buildings_ward_k(buildingsGDF, coords, num_clusters=3):
     # Perform Hierarchical Clustering
     clustering = AgglomerativeClustering(n_clusters=num_clusters, linkage='ward').fit(coords)
     return getClusters(buildingsGDF, coords, clustering.labels_)
 
-
+@profile
 def cluster_buildings_kMeans(buildingsGDF, coords, num_clusters=3):
     kmeans = KMeans(n_clusters=num_clusters, random_state=42, n_init=10)
     cluster_labels = kmeans.fit_predict(coords)
     return getClusters(buildingsGDF, coords, cluster_labels)
 
+@profile
 def getBuildingsDataFromGEE(polygon_coords):
     if not polygon_coords:
         return jsonify({"error": "Invalid polygon coordinates"}), 400
@@ -258,6 +262,7 @@ def getBuildingsDataFromGEE(polygon_coords):
             "Too many elements: The area contains more than 5000 buildings or grid cells. Please reduce the polygon size.")
     return buildings_geojson
 
+@profile
 def getBuildingsDataFromDB_streamData(polygon_coords):
     """
         Fetch buildings from the buildings table within the specified polygon.
@@ -335,7 +340,7 @@ def getBuildingsDataFromDB_streamData(polygon_coords):
         if conn:
             conn.close()
 
-
+@profile
 def getBuildingsDataFromDB1(polygon_coords):
     """
     Fetch buildings from the nigeria table within the specified polygon.
@@ -413,7 +418,7 @@ def getBuildingsDataFromDB1(polygon_coords):
     }
 
     return buildings_geojson
-
+@profile
 def getBuildingsDataFromDB(polygon_coords):
     """
     Fetch buildings from the nigeria table within the specified polygon, streaming results to avoid memory issues.
@@ -487,9 +492,11 @@ def getBuildingsDataFromDB(polygon_coords):
         if conn is not None:
             conn.close()
 
-
+@profile
 @app.route('/get_building_density', methods=['POST'])
 def get_building_density():
+    process = psutil.Process()
+    print(f"Memory at start: {process.memory_info().rss / 1024 / 1024:.1f} MiB")
     try:
         data = request.get_json()
         clustering_type = data.get("clusteringType")
@@ -500,11 +507,13 @@ def get_building_density():
         dbType = data.get("dbType")
 
         if clustering_type == "bottomUp":
-            return handle_bottom_up_clustering(data, no_of_clusters, no_of_buildings, tolerance)
+            result = handle_bottom_up_clustering(data, no_of_clusters, no_of_buildings, tolerance)
         else:
-            return handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of_buildings, tolerance, fetchClusters, dbType)
-
+            result = handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of_buildings, tolerance, fetchClusters, dbType)
+        print(f"Memory at end: {process.memory_info().rss / 1024 / 1024:.1f} MiB")
+        return result
     except Exception as e:
+        print(f"Memory during error: {process.memory_info().rss / 1024 / 1024:.1f} MiB")
         return jsonify({"error": str(e)}), 400
 
 
@@ -512,7 +521,7 @@ import math
 import numpy as np
 from flask import jsonify
 
-
+@profile
 def getBuildingsAroundPin(pin_lng, pin_lat, total_buildings_needed, tolerance=0.1):
     """
     Fetch buildings around a pin with initial 2km box, increment by 1.5x, capped at 10 km,
@@ -608,14 +617,14 @@ def create_bbox(pin_lng, pin_lat, delta):
     min_lat, max_lat = pin_lat - delta, pin_lat + delta
     return ee.Geometry.Rectangle([min_lng, min_lat, max_lng, max_lat])
 
-
+@profile
 def fetch_buildings(bbox, pin_point):
     """Fetch buildings within a bounding box and calculate distances."""
     return buildings.filterBounds(bbox).map(
         lambda feature: feature.set('distance', feature.geometry().centroid().distance(pin_point))
     )
 
-
+@profile
 def handle_bottom_up_clustering(data, no_of_clusters, no_of_buildings, tolerance):
     pin = data.get("pin")
     if not pin or len(pin) != 2:
@@ -653,12 +662,13 @@ def handle_bottom_up_clustering(data, no_of_clusters, no_of_buildings, tolerance
         "clusters": clusters
     })
 
-
+@profile
 def handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of_buildings, tolerance, fetchClusters, dbType):
     polygon_coords = data.get("polygon", [])
     if not polygon_coords:
         return jsonify({"error": "Invalid polygon coordinates"}), 400
-
+    process = psutil.Process()
+    print(f"Memory before fetching buildings: {process.memory_info().rss / 1024 / 1024:.1f} MiB")
     if dbType == 'GEE':
         buildings_geojson = getBuildingsDataFromGEE(polygon_coords)
     else:
@@ -666,11 +676,13 @@ def handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of
             buildings_geojson = getBuildingsDataFromDB_streamData(polygon_coords)
         except Exception as e:
             return jsonify({"error": f"Error fetching buildings from database: {str(e)}"}), 500
+
+    print(f"Memory after fetching buildings: {process.memory_info().rss / 1024 / 1024:.1f} MiB")
     coordinates = [
         feature['properties']['longitude_latitude']['coordinates']
         for feature in buildings_geojson['features']
     ]
-
+    print(f"Memory after coordinates: {process.memory_info().rss / 1024 / 1024:.1f} MiB")
     if not coordinates:
         return jsonify({"message": "No buildings found within the polygon", "building_count" : 0}), 404
 
