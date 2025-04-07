@@ -11,7 +11,7 @@ from flask_cors import CORS
 from k_means_constrained import KMeansConstrained
 from shapely.geometry import Polygon
 from sqlalchemy import create_engine
-
+from dotenv import load_dotenv
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 try:
@@ -44,9 +44,11 @@ DB_CONNECTION_STRING = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT
 
 engine = create_engine(DB_CONNECTION_STRING)
 
+load_dotenv()
 @app.route("/")
 def home():
-    return render_template("index.html")
+    host_url = os.getenv('HOST_URL', "https://map-clustering.onrender.com")
+    return render_template("index.html", host_url=host_url)
 
 
 def _calculate_cluster_sizes(n_samples, num_clusters, balance_tolerance=0.05):

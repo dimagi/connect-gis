@@ -12,3 +12,4 @@ shapely==2.0.3
 SQLAlchemy
 psycopg2-binary
 geojson
+python-dotenv
