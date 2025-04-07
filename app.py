@@ -14,6 +14,11 @@ from sqlalchemy import create_engine
 from dotenv import load_dotenv
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
+load_dotenv()
+
+# Fetch GEE credentials from environment variable
+GEE_CREDS = os.getenv("GEE_CREDS", "{}")
+
 try:
     # Ensure the directory exists
     os.makedirs(os.path.expanduser("~/.config/earthengine"), exist_ok=True)
@@ -22,7 +27,7 @@ try:
     credentials_path = os.path.expanduser("~/.config/earthengine/credentials")
     if not os.path.exists(credentials_path):
         with open(credentials_path, "w") as f:
-            f.write(os.environ.get("EEDA_CREDENTIALS", "{}"))
+            f.write(GEE_CREDS)
     ee.Initialize(
         opt_url='https://earthengine-highvolume.googleapis.com'
     )
@@ -44,7 +49,6 @@ DB_CONNECTION_STRING = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT
 
 engine = create_engine(DB_CONNECTION_STRING)
 
-load_dotenv()
 @app.route("/")
 def home():
     host_url = os.getenv('HOST_URL', "https://map-clustering.onrender.com")
