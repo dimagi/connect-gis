@@ -304,6 +304,7 @@
         // Constants and Global Variables
         let hostUrl = "{{ host_url }}";
         // hostUrl = "http://localhost:5000"
+        let uploadedReportData = null;
         let polygons = [];
         let selectedPolygonIndex = -1;
         let pinLatLng = null;
@@ -373,7 +374,7 @@
                 pinLatLng = [layer.getLatLng().lng, layer.getLatLng().lat];
                 drawnItems.addLayer(layer);
                 map.panTo(layer.getLatLng());
-                $('#run-clustering, #clear-oa, #downloadOaWkt').prop('disabled', false);
+                $('#run-clustering, #clear-oa, #download-oa-wkt').prop('disabled', false);
                 polygons = [];
                 updatePolygonDropdown()
             } else if (layerType === 'polygon' || layerType === 'rectangle' || layer instanceof L.Polygon) {
@@ -820,8 +821,6 @@
             buildingLayer.clearLayers();
 
             polygonData.clusterLayer.clearLayers();
-
-            // Initialize data structures
             const gridAssignments = new Map();
             const drawnGrids = [];
             // Use Maps instead of arrays for processedData
@@ -1030,15 +1029,6 @@
             }
         }
 
-        function updateGridLayer(gridLayer, gridIndex, newClusterId, processedData, getColorForNumber) {
-            gridLayer.eachLayer((layer) => {
-                const feature = layer?.options?.feature;
-                if (feature && feature.gridIndex === gridIndex) {
-                    layer.setStyle({ color: getColorForNumber(newClusterId) });
-                }
-            });
-        }
-
         function updateGridLayer(gridLayer, gridIndex, newClusterId, processedData, getColorForNumber, oldClusterId) {
 
             gridLayer.eachLayer((layer) => {
@@ -1172,6 +1162,7 @@
                     dropdown.append(option);
                 });
         }
+
         function groupClusters(clusters) {
             const clusterGroups = {};
             clusters.forEach((feature, index) => {
@@ -1234,7 +1225,6 @@
                 console.error("reassignAndDrawBuildings - Invalid polygonData for index:", index);
                 return;
             }
-
             if (!data || !data.clusters) {
                 console.error("data.clusters is undefined in reassignAndDrawBuildings", data);
                 return;
@@ -1276,8 +1266,6 @@
                     });
                 }
             });
-
-            // Defer building drawing to the end of drawGrids
         }
 
         function downloadGmapData() {
@@ -1286,39 +1274,31 @@
                 console.error("No processed data available for download at index:", index, polygonData);
                 return;
             }
-
             const processedData = polygonData.processedData;
             if (!processedData.clusters.size && !processedData.grids.size && !processedData.buildings.size) {
                 console.error("No processed data available for download");
                 return;
             }
-
-            // Export clusters and grids
             let clusterCsvContent = "WKT,name,description,SA,OA\n";
             processedData.clusters.forEach((cluster, clusterId) => {
                 clusterCsvContent += `"${cluster.boundaryWKT}",SA ${parseInt(cluster.clusterId) + 1},${cluster.buildingCount},-,${selectedPolygonIndex + 1}\n`;
             });
-
             processedData.grids.forEach((grid, index) => {
                 if (grid.buildingCount > 0) {
-                    clusterCsvContent += `"${grid.gridWKT}",DU ${index + 1},${grid.buildingCount} ,${parseInt(grid.clusterId) + 1},${selectedPolygonIndex + 1}\n`;
+                    clusterCsvContent += `"${grid.gridWKT}",DU ${index + 1},${grid.buildingCount},${parseInt(grid.clusterId) + 1},${selectedPolygonIndex + 1}\n`;
                 }
             });
-
-            // Export buildings
             let buildingsCsvContent = "Name,OA,SA,DU,latitude,longitude,area_in_meters,confidence,geometry,full_plus_code\n";
             processedData.buildings.forEach((building, index) => {
                 const featureProps = building.feature.properties || {};
-                const gridIndex = building.gridIndex !== undefined ? building.gridIndex + 1 : "N/A"; // 1-based grid index
-                const latitude = building.coordinates[1]; // Latitude is the second coordinate
-                const longitude = building.coordinates[0]; // Longitude is the first coordinate
+                const gridIndex = building.gridIndex !== undefined ? building.gridIndex + 1 : "N/A";
+                const latitude = building.coordinates[1];
+                const longitude = building.coordinates[0];
                 const areaInMeters = featureProps.area_in_meters || "N/A";
                 const confidence = featureProps.confidence || "N/A";
                 const fullPlusCode = featureProps.full_plus_code || "N/A";
-
                 buildingsCsvContent += `Building ${index + 1},${selectedPolygonIndex + 1},${parseInt(building.clusterId) + 1},${gridIndex},${latitude},${longitude},${areaInMeters},${confidence},"${building.wkt}",${fullPlusCode}\n`;
             });
-
             downloadCsv(clusterCsvContent, 'service_area_&_delivery_units.csv');
             downloadCsv(buildingsCsvContent, 'buildings.csv');
             downloadOAWkt();
@@ -1331,13 +1311,10 @@
                 console.error("No processed data available for download at index:", index, polygonData);
                 return;
             }
-
             const processedData = polygonData.processedData;
-
             let csvContent = "name,delivery_target,delivery_count,radius,centroid,bounding_box,service_area,flw,WKT,distance between adj sides 1,distance between adj sides 2,#Buildings,Surface Area (sq. meters), OA\n";
             processedData.grids.forEach((grid, index) => {
                 if (grid.buildingCount === 0) return;
-
                 const geometry = grid.geoJSON.geometry;
                 const bbox = turf.bbox(grid.geoJSON);
                 const widthDeg = bbox[2] - bbox[0];
@@ -1350,12 +1327,10 @@
                 const centroidStr = `${centroid[1]} ${centroid[0]}`;
                 const boundingBox = geometry.coordinates[0].map(coord => `${coord[1]} ${coord[0]}`).join(' ');
                 const surfaceArea = turf.area(grid.geoJSON);
-
                 const gridName = `Delivery Unit ${index + 1}`;
                 const deliveryTarget = 1, deliveryCount = 0;
-                csvContent += `"${gridName}",${deliveryTarget},${deliveryCount},${radius},"${centroidStr}",${boundingBox},${parseInt(grid.clusterId) + 1},"","${grid.gridWKT}",${widthMeters},${heightMeters},${grid.buildingCount},${surfaceArea},${selectedPolygonIndex +1}\n`;
+                csvContent += `"${gridName}",${deliveryTarget},${deliveryCount},${radius},"${centroidStr}",${boundingBox},${parseInt(grid.clusterId) + 1},"","${grid.gridWKT}",${widthMeters},${heightMeters},${grid.buildingCount},${surfaceArea},${selectedPolygonIndex + 1}\n`;
             });
-
             downloadCsv(csvContent, 'csv_for_CommCare.csv');
             showToast("CommCare CSV downloaded!", "success", 3000, "#00FF00");
         }
@@ -1382,16 +1357,13 @@
             const fileInput = $('#csvUpload')[0];
             const file = fileInput.files[0];
             if (!file) return showToast("Please select a CSV file.", "warning", 3000, "#FFA500");
-
             const reader = new FileReader();
             reader.onload = function (event) {
                 let successCount = 0;
                 let errorCount = 0;
-
                 try {
                     const rows = event.target.result.split('\n').filter(row => row.trim());
                     if (rows.length < 2) throw new Error("CSV has no data rows.");
-
                     const parseCSVRow = row => {
                         const fields = [];
                         let inQuotes = false, field = '';
@@ -1405,33 +1377,24 @@
                         fields.push(field.trim());
                         return fields;
                     };
-
-                    // Parse the header
                     const header = parseCSVRow(rows[0]);
-
-                    // Process each data row (starting from row 1)
                     for (let i = 1; i < rows.length; i++) {
                         try {
                             const dataRow = parseCSVRow(rows[i]);
                             if (dataRow.length < 2) throw new Error(`Row ${i + 1}: Lacks sufficient columns.`);
-
                             const wktString = dataRow[1];
                             if (!wktString.match(/^POLYGON \(\(.*\)\)$/)) throw new Error(`Row ${i + 1}: Invalid WKT format.`);
-
                             const coordsStr = wktString.match(/POLYGON \(\((.*?)\)\)/)?.[1];
                             if (!coordsStr) throw new Error(`Row ${i + 1}: Could not parse POLYGON coordinates.`);
-
                             const latLngs = coordsStr.split(', ').map(coord => {
                                 const [lon, lat] = coord.split(' ').map(Number);
                                 if (isNaN(lon) || isNaN(lat)) throw new Error(`Row ${i + 1}: Invalid coordinate values.`);
                                 return [lat, lon];
                             });
-
                             const mockLayer = {
                                 getLatLngs: () => [latLngs.map(([lat, lng]) => ({ lat, lng }))],
                                 getBounds: () => L.latLngBounds(latLngs)
                             };
-
                             addOrUpdatePolygon(mockLayer);
                             successCount++;
                             showToast(`Row ${i + 1}: OA loaded from CSV!`, "success", 2000, "#4CAF50");
@@ -1440,8 +1403,6 @@
                             showToast(`Error: ${error.message}`, "error", 3000, "#FF0000");
                         }
                     }
-
-                    // Summary feedback
                     if (successCount > 0) {
                         $('#uploaded-file-name').text(file.name);
                         showToast(`${successCount} polygon(s) loaded successfully!`, "success", 3000, "#4CAF50");
@@ -1466,19 +1427,16 @@
         function validateClusteringInputs(clusteringType, pinLatLng, polygon) {
             const showWarning = (message) => {
                 showToast(message, "warning", 3000, "#FFA500");
-                $('#run-clustering, #clear-oa, #downloadOaWkt').prop('disabled', false);
+                $('#run-clustering, #clear-oa, #download-oa-wkt').prop('disabled', false);
             };
-
             if (clusteringType === "bottomUp" && !pinLatLng) {
                 showWarning("Please drop a pin on the map first.");
                 return false;
             }
-
             if (clusteringType !== "bottomUp" && (!polygon || polygon.length === 0)) {
                 showWarning("Please draw a polygon on the map first.");
                 return false;
             }
-
             return true;
         }
 
@@ -1487,24 +1445,20 @@
                 showToast("Please select a polygon or drop a pin.", "warning", 3000, "#FFA500");
                 return;
             }
-
             const polygonData = polygons[index];
             if (polygonData.data && !fetchClusters) {
-                // Data already fetched, reuse it
                 $('#building-count').text(polygonData.buildingCount ?? 0);
                 addBuildings(index, polygonData.data);
                 updateSelectedPolygon();
                 return;
             }
-
             polygonData.densityLayer.clearLayers();
             polygonData.clusterLayer.clearLayers();
-
             let thresholdVal = $('#thresholdVal').val() || 0.5;
             if (thresholdVal > 100) thresholdVal = 100;
             if (thresholdVal < 0) thresholdVal = 0;
             const clusteringType = $('#clusteringType').val();
-            const dbType = $('#DBtype').val()
+            const dbType = $('#DBtype').val();
             let noOfClusters = $('#noOfClusters').val();
             if (noOfClusters <= 0) noOfClusters = 1;
             let noOfBuildings = $('#noOfBuildings').val();
@@ -1526,9 +1480,7 @@
                 fetchClusters,
                 dbType
             };
-
             showToast('Fetching data...', 'info', undefined, '#ff9300');
-
             fetch(`${hostUrl}/get_building_density`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1580,14 +1532,15 @@
             const coordsStr = polygonData.latlngs.map(coord => `${coord[0]} ${coord[1]}`).join(', ');
             const wkt = `POLYGON ((${coordsStr}))`;
             const csvContent = `OA Wkt\n"${wkt}"`;
-            // Download the CSV
             downloadCsv(csvContent, `oa_${selectedPolygonIndex + 1}_wkt.csv`);
             showToast("OA WKT downloaded!", "success", 2000, "#4CAF50");
         }
 
         $(document).ready(function () {
             toggleInputFields();
+            $('#sidebar-toggle-btn').on('click', toggleSidebar);
         });
+
         function toggleSidebar() {
             const $rightPanel = $('#right-panel');
             const $leftPanel = $('#left-panel');
@@ -1605,12 +1558,7 @@
             }
             setTimeout(() => map.invalidateSize(), 300);
         }
-        
-        $(document).ready(function () {
-            toggleInputFields();
-            $('#sidebar-toggle-btn').on('click', toggleSidebar);
-        });
-    
+
         $('#run-clustering').on('click', () => {
             if (selectedPolygonIndex !== -1) {
                 fetchData(selectedPolygonIndex, polygons[selectedPolygonIndex].latlngs, pinLatLng, true);
@@ -1651,6 +1599,7 @@
                 showToast("Please select a polygon.", "warning", 3000, "#FFA500");
             }
         });
+
         // Dropdown menu for Download button
         const downloadBtn = document.getElementById('download-btn');
         const downloadMenu = document.getElementById('download-menu');
