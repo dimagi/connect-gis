@@ -1321,8 +1321,7 @@
                 const heightDeg = bbox[3] - bbox[1];
                 const widthMeters = widthDeg * 111000 * Math.cos(turf.centroid(grid.geoJSON).geometry.coordinates[1] * Math.PI / 180);
                 const heightMeters = heightDeg * 111000;
-                const diagonal = Math.sqrt(widthMeters * widthMeters + heightMeters * heightMeters);
-                const radius = diagonal / 2;
+                const radius = widthMeters / 2;
                 const centroid = turf.centroid(grid.geoJSON).geometry.coordinates;
                 const centroidStr = `${centroid[1]} ${centroid[0]}`;
                 const boundingBox = geometry.coordinates[0].map(coord => `${coord[1]} ${coord[0]}`).join(' ');
@@ -1383,10 +1382,10 @@
                             const dataRow = parseCSVRow(rows[i]);
                             if (dataRow.length < 2) throw new Error(`Row ${i + 1}: Lacks sufficient columns.`);
                             const wktString = dataRow[1];
-                            if (!wktString.match(/^POLYGON \(\(.*\)\)$/)) throw new Error(`Row ${i + 1}: Invalid WKT format.`);
+                            if (!wktString.match(/^POLYGON \(\(.*\)\)$/)) throw new Error(`Row ${i + 1}: Invalid POLYGON format.`);
                             const coordsStr = wktString.match(/POLYGON \(\((.*?)\)\)/)?.[1];
-                            if (!coordsStr) throw new Error(`Row ${i + 1}: Could not parse POLYGON coordinates.`);
-                            const latLngs = coordsStr.split(', ').map(coord => {
+                            if (!coordsStr) throw new Error(`Row ${i + 1}: Coordinates should not be empty`);
+                            const latLngs = coordsStr.split(/, ?/).map(coord => {
                                 const [lon, lat] = coord.split(' ').map(Number);
                                 if (isNaN(lon) || isNaN(lat)) throw new Error(`Row ${i + 1}: Invalid coordinate values.`);
                                 return [lat, lon];
@@ -1401,14 +1400,12 @@
                         } catch (error) {
                             errorCount++;
                             showToast(`Error: ${error.message}`, "error", 3000, "#FF0000");
+                            return
                         }
                     }
-                    if (successCount > 0) {
+                    if (successCount > 0 && errorCount === 0) {
                         $('#uploaded-file-name').text(file.name);
                         showToast(`${successCount} polygon(s) loaded successfully!`, "success", 3000, "#4CAF50");
-                    }
-                    if (errorCount > 0) {
-                        showToast(`${errorCount} row(s) failed to load.`, "warning", 3000, "#FFA500");
                     }
                     if (successCount === 0 && errorCount > 0) {
                         $('#uploaded-file-name').text('No File Chosen');
