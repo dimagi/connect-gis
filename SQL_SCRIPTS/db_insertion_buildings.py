@@ -270,3 +270,6 @@ def create_indexes():
 
 if __name__ == "__main__":
     main()
+
+
+# Execute with the following cmd: python db_insertion_buildings.py --instance-id 0 --total-instances 4
