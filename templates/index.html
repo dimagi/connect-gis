@@ -191,105 +191,149 @@
                 </div>
             </div>
             <div id="right-panel">
-                <!-- CSV Operations -->
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">CSV Operations</h5>
-                        <div class="row g-2">
-                            <div class="col-6">
-                                <input type="text" id="csvDownload" class="d-none" onclick="downloadSampleCsv()">
-                                <label for="csvDownload" class="btn btn-secondary w-100">Download Sample CSV</label>
-                            </div>
-                            <div class="col-6">
-                                <input type="file" id="csvUpload" accept=".csv" class="d-none" onchange="uploadCSVPolygon()">
-                                <label for="csvUpload" class="btn btn-success w-100">Upload CSV</label>
+                <ul class="nav nav-tabs" id="myTab" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link text-dark active" id="polygon-clustering-tab" data-bs-toggle="tab" data-bs-target="#polygon-clustering" type="button" role="tab" aria-controls="polygon-clustering" aria-selected="true">
+                            Polygon-Clustering
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link text-dark" id="reports-tab" data-bs-toggle="tab" data-bs-target="#reports" type="button" role="tab" aria-controls="reports" aria-selected="false">
+                            Reports
+                        </button>
+                    </li>
+                </ul>
+                <div class="tab-content" id="myTabContent">
+                    <div class="tab-pane fade show active" id="polygon-clustering" role="tabpanel" aria-labelledby="polygon-clustering-tab">
+                        <!-- CSV Operations -->
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">CSV Operations</h5>
+                                <div class="row g-2">
+                                    <div class="col-6">
+                                        <input type="text" id="csvDownload" class="d-none" onclick="downloadSampleCsv()">
+                                        <label for="csvDownload" class="btn btn-secondary w-100">Download Sample CSV</label>
+                                    </div>
+                                    <div class="col-6">
+                                        <input type="file" id="csvUpload" accept=".csv" class="d-none" onchange="uploadCSVPolygon()">
+                                        <label for="csvUpload" class="btn btn-success w-100">Upload CSV</label>
+                                    </div>
+                                </div>
+                                <span id="uploaded-file-name" class="d-block text-muted mt-2">No File Chosen</span>
                             </div>
                         </div>
-                        <span id="uploaded-file-name" class="d-block text-muted mt-2">No File Chosen</span>
-                    </div>
-                </div>
 
-                <!-- Area Details -->
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">Oppurtunity Area Details</h5>
-                        <div class="mb-3">
-                            <label for="polygonSelect" class="form-label">Select OA:</label>
-                            <select class="form-select" id="polygonSelect" onchange="updateSelectedPolygon()">
-                                <option value="-1" selected>No OA Selected</option>
-                            </select>
+                        <!-- Area Details -->
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">Opportunity Area Details</h5>
+                                <div class="mb-3">
+                                    <label for="polygonSelect" class="form-label">Select OA:</label>
+                                    <select class="form-select" id="polygonSelect" onchange="updateSelectedPolygon()">
+                                        <option value="-1" selected>No OA Selected</option>
+                                    </select>
+                                </div>
+                                <p id="info">Total Buildings: <span id="total-building-count">0</span></p>
+                                <p id="info">Buildings in selected OA: <span id="building-count">0</span></p>
+                                <p id="clusterCount">Service Areas Created: <span id="cluster-count-val">0</span></p>
+                            </div>
                         </div>
-                        <p id="info">Total Buildings: <span id="total-building-count">0</span></p>
-                        <p id="info">Buildings in selected OA: <span id="building-count">0</span></p>
-                        <p id="clusterCount">Service Areas Created: <span id="cluster-count-val">0</span></p>
-                    </div>
-                </div>
 
-                <!-- Clustering Settings -->
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">Clustering Settings</h5>
-                        <div class="mb-3">
-                            <label for="DBtype" class="form-label">Fetch Buildings From:</label>
-                            <select class="form-select" id="DBtype">
-                                <option value="GEE">Google Earth Engine (GEE)</option>
-                                <option value="psql">Postgres Data Base</option>
-                            </select>
+                        <!-- Clustering Settings -->
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">Clustering Settings</h5>
+                                <div class="mb-3">
+                                    <label for="DBtype" class="form-label">Fetch Buildings From:</label>
+                                    <select class="form-select" id="DBtype">
+                                        <option value="GEE">Google Earth Engine (GEE)</option>
+                                        <option value="psql">Postgres Data Base</option>
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="clusteringType" class="form-label">Specify one parameter:</label>
+                                    <select class="form-select" id="clusteringType" onchange="toggleInputFields()">
+                                        <option value="kMeans">Number of Service Areas</option>
+                                        <option value="balancedKMeans">Number of buildings per Service Area</option>
+                                        <option value="bottomUp">Bottom-Up Approach</option>
+                                    </select>
+                                </div>
+                                <div id="noOfClustersIP" class="mb-3 d-none">
+                                    <label for="noOfClusters" class="form-label">Number of Service Areas:</label>
+                                    <input type="number" class="form-control" id="noOfClusters" min="1" value="3">
+                                </div>
+                                <div id="noOfBuildingsIP" class="mb-3 d-none">
+                                    <label for="noOfBuildings" class="form-label">No of Buildings:</label>
+                                    <input type="number" class="form-control" id="noOfBuildings" value="250">
+                                </div>
+                                <div id="thresholdValueIP" class="mb-3 d-none">
+                                    <label for="thresholdVal" class="form-label">Tolerance Value as %:</label>
+                                    <input type="number" class="form-control" id="thresholdVal" step="0.01" value="10" min="0" max="100">
+                                </div>
+                                <div class="mb-3">
+                                    <label for="gridLength" class="form-label">Delivery Unit Length in metres:</label>
+                                    <input type="number" class="form-control" id="gridLength" step="0.01" value="50">
+                                </div>
+                            </div>
                         </div>
-                        <div class="mb-3">
-                            <label for="clusteringType" class="form-label">Specify one parameter:</label>
-                            <select class="form-select" id="clusteringType" onchange="toggleInputFields()">
-                                <option value="kMeans">Number of Service Areas</option>
-                                <option value="balancedKMeans">Number of buildings per Service Area</option>
-                                <option value="bottomUp">Bottom-Up Approach</option>
-                            </select>
-                        </div>
-                        <div id="noOfClustersIP" class="mb-3 d-none">
-                            <label for="noOfClusters" class="form-label">Number of Service Areas:</label>
-                            <input type="number" class="form-control" id="noOfClusters" min="1" value="3">
-                        </div>
-                        <div id="noOfBuildingsIP" class="mb-3 d-none">
-                            <label for="noOfBuildings" class="form-label">No of Buildings:</label>
-                            <input type="number" class="form-control" id="noOfBuildings" value="250">
-                        </div>
-                        <div id="thresholdValueIP" class="mb-3 d-none">
-                            <label for="thresholdVal" class="form-label">Tolerance Value as %:</label>
-                            <input type="number" class="form-control" id="thresholdVal" step="0.01" value="10" min="0" max="100">
-                        </div>
-                        <div class="mb-3">
-                            <label for="gridLength" class="form-label">Delivery Unit Length in metres:</label>
-                            <input type="number" class="form-control" id="gridLength" step="0.01" value="50">
+
+                        <!-- Actions -->
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">Actions</h5>
+                                <div class="row g-2">
+                                    <div class="col-6">
+                                        <button class="btn btn-success w-100" id="run-clustering" disabled>Get Service Areas</button>
+                                    </div>
+                                    <div class="col-6">
+                                        <button class="btn btn-warning w-100" onclick="clearClusters(false)" id="clear-clusters" disabled>Clear Service Areas</button>
+                                    </div>
+                                    <div class="col-6">
+                                        <button class="btn btn-success w-100" id="get-grids" disabled>Get Delivery Units</button>
+                                    </div>
+                                    <div class="col-6">
+                                        <button class="btn btn-warning w-100" addClusters(lastFetchedData, true) id="clear-grids" disabled>Clear Delivery Units</button>
+                                    </div>
+                                    <div class="col-6">
+                                        <button class="btn btn-danger w-100" onclick="clearOA()" id="clear-oa" disabled>Clear Map</button>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="download-container">
+                                            <button class="btn btn-primary w-100" id="download-btn" disabled>Download <span>▼</span></button>
+                                            <div id="download-menu" class="download-menu" style="display: none;">
+                                                <button id="download-oa-wkt" class="download-option">Download OA WKT</button>
+                                                <button id="download-csv-my-maps" class="download-option">Download CSV for My Maps</button>
+                                                <button id="download-csv-commcare" class="download-option">Download CSV for CommCare</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                </div>
-
-                <!-- Actions -->
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">Actions</h5>
-                        <div class="row g-2">
-                            <div class="col-6">
-                                <button class="btn btn-success w-100" id="run-clustering" disabled>Get Service Areas</button>
+                    <div class="tab-pane fade" id="reports" role="tabpanel" aria-labelledby="reports-tab">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">Operations</h5>
+                                <div class="row g-2">
+                                    <div class="col-6">
+                                        <input type="text" id="csvReportSampleDownload" class="d-none" onclick="downloadSampleReportsCsv()">
+                                        <label for="csvReportSampleDownload" class="btn btn-secondary w-100">Download Sample CSV</label>
+                                    </div>
+                                    <div class="col-6">
+                                        <input type="file" id="csvReportUpload" accept=".csv" class="d-none" onchange="uploadReportCsv()">
+                                        <label for="csvReportUpload" class="btn btn-success w-100">Upload CSV</label>
+                                    </div>
+                                </div>
+                                <span id="uploaded-report-file-name" class="d-block text-muted mt-2">No File Chosen</span>
                             </div>
-                            <div class="col-6">
-                                <button class="btn btn-warning w-100" onclick="clearClusters(false)" id="clear-clusters" disabled>Clear Service Areas</button>
-                            </div>
-                            <div class="col-6">
-                                <button class="btn btn-success w-100" id="get-grids" disabled>Get Delivery Units</button>
-                            </div>
-                            <div class="col-6">
-                                <button class="btn btn-warning w-100" addClusters(lastFetchedData, true) id="clear-grids" disabled>Clear Delivery Units</button>
-                            </div>
-                            <div class="col-6">
-                                <button class="btn btn-danger w-100" onclick="clearOA()" id="clear-oa" disabled>Clear Map</button>
-                            </div>
-                            <div class="col-6">
-                                <div class="download-container">
-                                    <button class="btn btn-primary w-100" id="download-btn" disabled>Download <span>▼</span></button>
-                                    <div id="download-menu" class="download-menu" style="display: none;">
-                                        <button id="download-oa-wkt" class="download-option">Download OA WKT</button>
-                                        <button id="download-csv-my-maps" class="download-option">Download CSV for My Maps</button>
-                                        <button id="download-csv-commcare" class="download-option">Download CSV for CommCare</button>
+                        </div>
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title">Actions</h5>
+                                <div class="row g-2">
+                                    <div class="col-12">
+                                        <button class="btn btn-success w-100" id="download-ward-summary-report" disabled>Generate Deployment Summary Report</button>
                                     </div>
                                 </div>
                             </div>
@@ -1421,6 +1465,102 @@
             reader.readAsText(file);
         }
 
+        function downloadSampleReportsCsv() {
+            const headers = `visit_id,opportunity_name,flw_id,visit_date,opportunity_id,latitude,longitude,elevation_in_m,accuracy_in_m`;
+            const rows = [
+                `161605,Solina | CHC Givewell 100k,1502,2025-02-11 17:54:06.307000+00:00,411,11.2649667,7.64974,648.1,5.7`,
+                `161606,Solina | CHC Givewell 100k,1502,2025-02-11 17:58:29.396000+00:00,411,11.265,7.649735,663.4,4.4`,
+                `161990,Solina | CHC Givewell 100k,1439,2025-02-12 10:29:46.731000+00:00,411,11.2005818,7.8001467,686.3,8.5`
+            ];
+            
+            const csvContent = [headers, ...rows].join('\n');
+            downloadCsv(csvContent, 'sample_summary_report_input_csv_file.csv');
+        }
+
+        function uploadReportCsv() {
+            const fileInput = $('#csvReportUpload')[0];
+            const file = fileInput.files[0];
+            if (!file) return showToast("Please select a CSV file.", "warning", 3000, "#FFA500");
+            const reader = new FileReader();
+            reader.onload = function (event) {
+                try {
+                    const rows = event.target.result.split('\n').filter(row => row.trim());
+                    if (rows.length < 2) throw new Error("CSV has no data rows.");
+                    const parseCSVRow = row => {
+                        const fields = [];
+                        let inQuotes = false, field = '';
+                        for (let char of row) {
+                            if (char === '"') inQuotes = !inQuotes;
+                            else if (char === ',' && !inQuotes) {
+                                fields.push(field.trim());
+                                field = '';
+                            } else field += char;
+                        }
+                        fields.push(field.trim());
+                        return fields;
+                    };
+                    const header = parseCSVRow(rows[0]);
+                    const data = rows.slice(1).map(row => {
+                        const fields = parseCSVRow(row);
+                        return header.reduce((obj, h, i) => {
+                            obj[h] = fields[i] || '';
+                            return obj;
+                        }, {});
+                    });
+                    uploadedReportData = data; // Store the parsed CSV data
+                    $('#uploaded-report-file-name').text(file.name);
+                    showToast("CSV uploaded successfully!", "success", 3000, "#4CAF50");
+                    enableOrDisableHtmlAttribute("download-ward-summary-report", false); // Enable download button
+                } catch (error) {
+                    showToast(`Error: ${error.message}`, "error", 3000, "#FF0000");
+                    $('#uploaded-report-file-name').text('No File Chosen');
+                    uploadedReportData = null;
+                    enableOrDisableHtmlAttribute("download-ward-summary-report", true);
+                } finally {
+                    fileInput.value = '';
+                }
+            };
+            reader.onerror = () => showToast("Error reading CSV file.", "error", 3000, "#FF0000");
+            reader.readAsText(file);
+        }
+
+        function  downloadWardsSummaryReport() {
+            if (!uploadedReportData) {
+                showToast("No report data available. Please upload a CSV first.", "warning", 3000, "#FFA500");
+                return;
+            }
+
+            showToast('Generating report...', 'info', undefined, '#ff9300');
+            let filename = 'Ward_summary_report.csv';
+
+            fetch(`${hostUrl}/generate_report`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ data: uploadedReportData })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`Failed to generate report: ${response.statusText}`);
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                showToast("Report Generatec successfully!", "success", 2000, "#4CAF50");
+            })
+            .catch(error => {
+                showToast(`Error: ${error.message}`, 'error', 5000, '#FF0000', '300px');
+                console.error('Error:', error);
+            })
+        }
+
         function validateClusteringInputs(clusteringType, pinLatLng, polygon) {
             const showWarning = (message) => {
                 showToast(message, "warning", 3000, "#FFA500");
@@ -1562,6 +1702,10 @@
             } else {
                 showToast("Please select a polygon.", "warning", 3000, "#FFA500");
             }
+        });
+
+        $('#download-ward-summary-report').on('click', () => {
+            downloadWardsSummaryReport()
         });
 
         $('#clear-clusters').on('click', () => {
