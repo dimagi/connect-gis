@@ -1779,6 +1779,46 @@
             downloadBtn.setAttribute('aria-expanded', 'false');
             downloadCsvForCommCare();
         });
+
+        $(document).ready(function () {
+            toggleInputFields();
+            $('#sidebar-toggle-btn').on('click', toggleSidebar);
+
+            // Function to activate tab based on URL parameter
+            function activateTabFromURL() {
+                const urlParams = new URLSearchParams(window.location.search);
+                const tabParam = urlParams.get('tab');
+
+                if (tabParam) {
+                    let tabId = '';
+                    switch (tabParam.toLowerCase()) {
+                        case 'polygon-clustering':
+                            tabId = '#polygon-clustering-tab';
+                            break;
+                        case 'reports':
+                            tabId = '#reports-tab';
+                            break;
+                        default:
+                            tabId = '#polygon-clustering-tab'; // Default tab
+                    }
+
+                    // Activate the tab
+                    const tab = new bootstrap.Tab(document.querySelector(tabId));
+                    tab.show();
+
+                    // Update the URL without reloading (optional)
+                    window.history.replaceState(null, '', `?tab=${tabParam}`);
+                } else {
+                    const defaultTab = new bootstrap.Tab(document.querySelector('#polygon-clustering-tab'));
+                    defaultTab.show();
+                }
+            }
+
+            activateTabFromURL();
+
+            window.addEventListener('popstate', activateTabFromURL);
+        });
+
     </script>
 </body>
 </html>
