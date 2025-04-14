@@ -1,17 +1,21 @@
+import csv
 import json
 import math
 import os
+import time
 from collections import Counter
+from datetime import datetime
+from io import StringIO
 
 import ee
 import numpy as np
-from flask import Flask, request, render_template
-from flask import jsonify
+from dotenv import load_dotenv
+from flask import Flask, render_template, Response, request, jsonify
 from flask_cors import CORS
 from k_means_constrained import KMeansConstrained
 from shapely.geometry import Polygon
-from sqlalchemy import create_engine
-from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
+
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 load_dotenv()
@@ -425,6 +429,129 @@ def handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of
         "buildings": buildings_geojson,
         "clusters": clusters
     })
+
+@app.route('/generate_report', methods=['POST'])
+def getReports():
+    start_time = time.time()
+    print('Report generation started')
+    report = getReports_sqlQuery()
+    app.logger.info(f"Report generated at: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}, Total time taken: {round(time.time() - start_time, 4)} seconds")
+    return report
+
+def getReports_sqlQuery():
+    try:
+        data = request.get_json().get('data')
+        if not data or not isinstance(data, list):
+            return jsonify({"error": "No valid data provided"}), 400
+
+        # Validate and extract visit points
+        visit_points = []
+        for entry in data:
+            lat = entry.get('latitude')
+            lng = entry.get('longitude')
+            flw_id = entry.get('flw_id', -1)
+            if lat is not None and lng is not None:
+                try:
+                    lat = float(lat)
+                    lng = float(lng)
+                    if -90 <= lat <= 90 and -180 <= lng <= 180:
+                        visit_points.append(f"(ST_GeomFromText('POINT({lng} {lat})', 4326), '{flw_id}')")
+                    else:
+                        print(f"Skipping invalid coordinates: lat={lat}, lng={lng}")
+                except (ValueError, TypeError):
+                    print(f"Skipping invalid numeric value for lat={lat}, lng={lng}")
+
+        if not visit_points:
+            return jsonify({"error": "No valid latitude/longitude data provided"}), 400
+
+        # Single query to get all results with PHC metrics
+        query = """WITH
+                    visit_data As (
+                       SELECT geom, flw_id
+                        FROM (VALUES {points}) AS t(geom, flw_id)
+                    ),
+                    -- Step 1: Prepare visit points with counts
+                    visit_stats AS (
+                        SELECT geom, COUNT(*) AS visit_count, COUNT(DISTINCT flw_id) AS unique_flw_count
+                        FROM visit_data  GROUP BY geom
+                    ),
+                    -- Step 2: Pre-join visits to wards
+                    ward_visits AS (
+                        SELECT 
+                            w.state_name,
+                            w.lga_name,
+                            w.ward_name,
+                            w.ward_code,
+                            w.population,
+                            w.geom as ward_geom,
+                            vs.geom,
+                            vs.visit_count,
+                            vs.unique_flw_count
+                        FROM wards w
+                        JOIN visit_stats vs ON ST_Contains(w.geom, vs.geom)
+                    ),
+                    -- Step 3: Pre-calculate PHC counts per ward (avoids duplicate joins)
+                    ward_phc_counts AS (
+                        SELECT w.ward_code, COUNT(DISTINCT hf.geom) AS num_phc_serve_ward
+                        FROM ward_visits w
+                        JOIN (select geom from health_facilities) hf ON ST_Intersects(w.ward_geom, hf.geom)
+                        GROUP BY w.ward_code
+                    ),
+                    -- Step 4: Pre-calculate distances
+                    visit_distances AS (
+                        SELECT v.geom,
+                            MIN(ST_Distance(ST_Transform(v.geom, 32632), ST_Transform(hf.geom, 32632))) AS min_distance
+                        FROM visit_stats v
+                        JOIN (select geom from health_facilities) hf ON ST_DWithin(v.geom, hf.geom, 0.1)
+                        GROUP BY v.geom
+                    )
+                    -- Final aggregation
+                    SELECT 
+                        wv.state_name,
+                        wv.lga_name,
+                        wv.ward_name,
+                        wv.ward_code,
+                        wv.population,
+                        SUM(wv.visit_count) AS visit_count,
+                        SUM(wv.unique_flw_count) AS unique_flw_count,
+                        COALESCE(wpc.num_phc_serve_ward, 0) AS num_phc_serve_ward,
+                        ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY vd.min_distance)::numeric, 2) AS median_visit_to_phc,
+                        ROUND(MAX(COALESCE(vd.min_distance, 0))::numeric, 2) AS max_visit_to_phc,
+                        ROUND(((count(wv.visit_count::numeric) / (population * 0.18)) * 100)::numeric, 2) AS coverage
+                    FROM ward_visits wv
+                    LEFT JOIN visit_distances vd ON wv.geom = vd.geom
+                    LEFT JOIN ward_phc_counts wpc ON wv.ward_code = wpc.ward_code
+                    GROUP BY 
+                        wv.state_name, 
+                        wv.lga_name, 
+                        wv.ward_name, 
+                        wv.ward_code, 
+                        wv.population,
+                        wpc.num_phc_serve_ward;""".format(points=','.join(visit_points))
+
+        # Execute query and fetch all results
+        with engine.connect() as connection:
+            result = connection.execute(text(query)).fetchall()
+
+        # Generate CSV in memory
+        output = StringIO()
+        writer = csv.writer(output, quoting=csv.QUOTE_NONNUMERIC)
+        writer.writerow([
+            "state_name", "lga_name", "ward_name", "ward_code", "population", "visit_count", "unique_flw_count",
+            "num.phc.serve.ward", "median.visit.to.phc", "max.visit.to.phc", "coverage"
+        ])
+        writer.writerows(result)
+
+        # Prepare and return the CSV response
+        output.seek(0)
+        return Response(
+            output.getvalue(),
+            mimetype="text/csv",
+            headers={"Content-Disposition": "attachment; filename=Ward_summary_report.csv"}
+        )
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 # Run the Flask app
 if __name__ == '__main__':
