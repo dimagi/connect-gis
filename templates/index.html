@@ -1438,9 +1438,9 @@
                                 getLatLngs: () => [latLngs.map(([lat, lng]) => ({ lat, lng }))],
                                 getBounds: () => L.latLngBounds(latLngs)
                             };
+                        showToast(`Row ${i + 1}: OA loaded from CSV!`, "success", 2000, "#4CAF50");
                             addOrUpdatePolygon(mockLayer);
                             successCount++;
-                            showToast(`Row ${i + 1}: OA loaded from CSV!`, "success", 2000, "#4CAF50");
                         } catch (error) {
                             errorCount++;
                             showToast(`Error: ${error.message}`, "error", 3000, "#FF0000");
@@ -1449,7 +1449,6 @@
                     }
                     if (successCount > 0 && errorCount === 0) {
                         $('#uploaded-file-name').text(file.name);
-                        showToast(`${successCount} polygon(s) loaded successfully!`, "success", 3000, "#4CAF50");
                     }
                     if (successCount === 0 && errorCount > 0) {
                         $('#uploaded-file-name').text('No File Chosen');
