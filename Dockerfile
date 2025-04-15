@@ -15,4 +15,4 @@ COPY . .
 EXPOSE 5000
 
 # Set the command to run the Flask app
-CMD ["python", "-u", "-m","gunicorn", "--workers", "1", "--threads=2", "--timeout", "300", "--bind", "0.0.0.0:5000", "app:app"]
+CMD ["python", "-u", "-m","gunicorn", "--workers", "1", "--threads=2", "--timeout", "1800", "--bind", "0.0.0.0:5000", "app:app"]
