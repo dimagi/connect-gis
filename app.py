@@ -435,7 +435,6 @@ def getReports():
     start_time = time.time()
     print('Report generation started')
     report = getReports_sqlQuery()
-    app.logger.info(f"Report generated at: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}, Total time taken: {round(time.time() - start_time, 4)} seconds")
     return report
 
 def getReports_sqlQuery():
