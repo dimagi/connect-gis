@@ -246,8 +246,8 @@
                                 <div class="mb-3">
                                     <label for="DBtype" class="form-label">Fetch Buildings From:</label>
                                     <select class="form-select" id="DBtype">
-                                        <option value="GEE">Google Earth Engine (GEE)</option>
                                         <option value="psql">Postgres Data Base</option>
+                                        <option value="GEE">Google Earth Engine (GEE)</option>
                                     </select>
                                 </div>
                                 <div class="mb-3">
@@ -332,6 +332,12 @@
                             <div class="card-body">
                                 <h5 class="card-title">Actions</h5>
                                 <div class="row g-2">
+                                    <div class="col-12">
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" role="switch" id="fetchVisitToBuildingsVal">
+                                            <label class="form-check-label" for="fetchVisitToBuildingsVal">Fetch Visit to Buildings Data</label>
+                                        </div>
+                                    </div>
                                     <div class="col-12">
                                         <button class="btn btn-success w-100" id="download-ward-summary-report" disabled>Generate Deployment Summary Report</button>
                                     </div>
@@ -1531,11 +1537,11 @@
 
             showToast('Generating report...', 'info', undefined, '#ff9300');
             let filename = 'Ward_summary_report.csv';
-
+            const fetchVisitToBuildingsVal = $('#fetchVisitToBuildingsVal').prop('checked');
             fetch(`${hostUrl}/generate_report`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ data: uploadedReportData })
+                body: JSON.stringify({ data: uploadedReportData, fetchVisitToBuildingsVal })
             })
             .then(response => {
                 if (!response.ok) {
