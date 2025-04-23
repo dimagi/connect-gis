@@ -397,7 +397,7 @@
         const facilitiesIndex = new RBush();
         let wardsLayer = null, healthFacilitiesLayer = null;
         let loadedWardsBounds = null, loadedHealthBounds = null;
-
+        let clusterBuildingCounts = new Map();
         Promise.all([
             fetch('/static/nigeria_ward.geojson').then(r => r.json()),
             fetch('/static/nigeria_health_facilities.geojson').then(r => r.json())
@@ -791,6 +791,7 @@
             });
 
             polygonData.clusterCount = noOfClusters;
+            polygonData.avgBuildings = (polygonData.buildingCount / noOfClusters)
             $('#cluster-count-val').text(noOfClusters);
         }
 
@@ -897,8 +898,32 @@
             // Batch all grid features for a single L.geoJSON call
             const gridFeatures = [];
             // const assignedBuildingIndices = new Set();
+            // Step 1: Create non-overlapping and overlapping grid arrays
+            const nonOverlappingGrids = [];
+            const overlappingGrids = [];
+
             grid.features.forEach((currentGrid, gridIndex) => {
-                const majorityCluster = findMajorityCluster(currentGrid, boundaries);
+                const candidates = [];
+                Object.entries(boundaries).forEach(([clusterId, boundary]) => {
+                    const intersection = turf.intersect(currentGrid, boundary);
+                    if (intersection) {
+                        candidates.push({ clusterId: parseInt(clusterId) });
+                    }
+                });
+
+                if (candidates.length === 1) {
+                    nonOverlappingGrids.push({ grid: currentGrid, gridIndex });
+                } else if (candidates.length > 1) {
+                    overlappingGrids.push({ grid: currentGrid, gridIndex });
+                }
+            });
+
+            // Step 2: Combine arrays
+            const allGrids = nonOverlappingGrids.concat(overlappingGrids);
+
+            // Step 4: Process all grids
+            allGrids.forEach(({ grid: currentGrid, gridIndex } ) => {
+                const majorityCluster = findMajorityCluster(currentGrid, boundaries, polygonData.avgBuildings);
                 if (!majorityCluster) {
                     return;
                 }
@@ -1151,7 +1176,7 @@
             updateClusterCount(processedData, polygonData);
         }
 
-        function setGridNeigboursInDropdown(currentCluster, currentGridData, clusterGroups, drawnGrids) {
+        function setGridNeigboursInDropdown(currentCluster, currentGridData, clusterGroups, index, drawnGrids) {
             const boundaries = computeBoundaries(clusterGroups);
             const dropdown = $('#neighbor-clusters');
             dropdown.empty();
@@ -1197,7 +1222,7 @@
                 if (assignedCluster !== null) {
                     neighborClusters.add(assignedCluster);
                 } else {
-                    const majorityCluster = findMajorityCluster(adjacentGrid, boundaries);
+                    const majorityCluster = findMajorityCluster(adjacentGrid, boundaries, polygons[index].avgBuildingCount);
                     if (majorityCluster !== null) {
                         neighborClusters.add(parseInt(majorityCluster));
                     }
@@ -1215,6 +1240,7 @@
 
         function groupClusters(clusters) {
             const clusterGroups = {};
+            clusterBuildingCounts.clear();
             clusters.forEach((feature, index) => {
                 const { cluster, coordinates } = feature;
                 if (!clusterGroups[cluster]) {
@@ -1255,18 +1281,42 @@
             );
         }
 
-        function findMajorityCluster(grid, boundaries) {
-            const intersectingClusters = [];
+        function findMajorityCluster(grid, boundaries, avgBuildingCount) {
+            const clusters = [];
+            const totalArea = turf.area(grid);
             Object.entries(boundaries).forEach(([clusterId, boundary]) => {
                 const intersection = turf.intersect(grid, boundary);
                 if (intersection) {
                     const area = turf.area(intersection);
-                    intersectingClusters.push({ clusterId, area });
+                    const areaRatio = area / totalArea;
+                    const clusterIdInt = clusterId;
+                    const buildingCount = clusterBuildingCounts.get(clusterIdInt) || 0;
+                    clusters.push({ clusterId: clusterIdInt, areaRatio, buildingCount });
                 }
             });
-            if (intersectingClusters.length === 0) return null;
-            intersectingClusters.sort((a, b) => b.area - a.area);
-            return intersectingClusters[0].clusterId;
+
+            if (clusters.length === 0) {
+                console.warn('No intersecting clusters for grid:', grid);
+                return null;
+            }
+
+            if (clusters.length === 1) {
+                // Non-overlapping grid or non-balancing mode: assign to single cluster or largest area
+                clusters.sort((a, b) => b.areaRatio - a.areaRatio);
+                return clusters[0].clusterId;
+            }
+
+            // Overlapping grid: apply balancing logic
+            const belowAvg = clusters.filter(c => c.buildingCount < avgBuildingCount);
+
+            if (belowAvg.length === 1) {
+                // One below average: assign to that cluster
+                return belowAvg[0].clusterId;
+            } else {
+                // Both above/below average: assign to cluster with largest area
+                clusters.sort((a, b) => b.areaRatio - a.areaRatio);
+                return clusters[0].clusterId;
+            }
         }
 
         function reassignAndDrawBuildings(index, buildingsInGrid, majorityCluster, data, assignedBuildings, processedData, gridIndexNum) {
@@ -1295,6 +1345,9 @@
                 if (assignedBuildings.has(coordKey)) {
                     return;
                 }
+
+                const majorityCount = clusterBuildingCounts.get(majorityCluster) || 0;
+                clusterBuildingCounts.set(majorityCluster, majorityCount + 1);
 
                 // Update the cluster assignment
                 data.clusters[buildingIndex].cluster = parseInt(majorityCluster);

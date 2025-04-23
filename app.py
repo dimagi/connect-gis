@@ -207,7 +207,7 @@ def getBuildingsDataFromDB_streamData(polygon_coords):
                     "id": str(id),
                     "area_in_meters": area_in_meters,
                     "confidence": confidence if confidence is not None else 0,
-                    "record_id": record_id,
+                    "full_plus_code": record_id,
                     "longitude_latitude": {
                         "type": "Point",
                         "coordinates": [longitude, latitude]
