@@ -1052,6 +1052,10 @@
                 style: feature => feature.properties.style,
                 onEachFeature: (feature, layer) => {
                     if (feature.properties.buildingCount) {
+                        selectedGridIndex = feature.properties.gridIndexNum - 1;
+                        const currentGridData = drawnGrids[selectedGridIndex].grid;
+                        const currentCluster = currentGridData.properties.cluster;
+                        const currentBuildingCount = currentGridData.properties.buildingCount;
                         layer.options.feature = {
                             gridIndex: feature.properties.gridIndexNum - 1
                         };
@@ -1059,7 +1063,13 @@
                             const clusterId = parseInt(layer.feature.properties.cluster);
                             const clusterData = processedData.clusters.get(clusterId);
                             const totalBuildings = clusterData ? clusterData.buildingCount : 0;
-                            return `Service Area ${clusterId + 1} \n Total Buildings in Cluster: ${totalBuildings}`;
+
+                            return `
+                                <b>Service Area:</b> ${parseInt(clusterId) + 1}<br>
+                                <b>Delivery Unit:</b> ${feature.properties.gridIndexNum}<br>
+                                <b>Buildings in DU:</b> ${currentBuildingCount}<br>
+                                <b>Total Buildings in Service Area:</b> ${totalBuildings}
+                            `;
                         }, { sticky: true, direction: 'auto', opacity: 0.9 });
 
                         layer.on('click', () => {
