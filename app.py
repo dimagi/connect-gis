@@ -4,17 +4,18 @@ import math
 import os
 import time
 from collections import Counter
-from datetime import datetime
 from io import StringIO
 
 import ee
+import geopandas as gpd
 import numpy as np
+import pandas as pd
 from dotenv import load_dotenv
 from flask import Flask, render_template, Response, request, jsonify
 from flask_cors import CORS
 from k_means_constrained import KMeansConstrained
 from shapely.geometry import Polygon
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.sql import text
 
 app = Flask(__name__)
@@ -505,6 +506,223 @@ def getReports_sqlQuery():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
+
+def generate_grid(polygon_coords, grid_size_meters=50):
+    """
+    Generate a 50x50 meter grid over the polygon.
+    Args:
+        polygon_coords: List of [lng, lat] coordinates
+        grid_size_meters: Grid size in meters
+    Returns:
+        GeoDataFrame with grid polygons and centroids
+    """
+    # Validate polygon coordinates
+    if not polygon_coords or len(polygon_coords) < 3:
+        raise ValueError("Invalid polygon coordinates: must have at least 3 points")
+
+    try:
+        polygon = Polygon(polygon_coords)
+        if not polygon.is_valid:
+            raise ValueError("Invalid polygon: geometry is not valid")
+    except Exception as e:
+        raise ValueError(f"Failed to create polygon: {str(e)}")
+
+    avg_lat = polygon.centroid.y
+    meters_to_deg = grid_size_meters / (111000 * math.cos(math.radians(avg_lat)))
+
+    minx, miny, maxx, maxy = polygon.bounds
+    x_steps = math.ceil((maxx - minx) / meters_to_deg)
+    y_steps = math.ceil((maxy - miny) / meters_to_deg)
+
+    grids = []
+    for i in range(x_steps):
+        for j in range(y_steps):
+            x = minx + i * meters_to_deg
+            y = miny + j * meters_to_deg
+            grid_poly = Polygon([
+                [x, y],
+                [x + meters_to_deg, y],
+                [x + meters_to_deg, y + meters_to_deg],
+                [x, y + meters_to_deg],
+                [x, y]
+            ])
+            if polygon.intersects(grid_poly):
+                intersection = polygon.intersection(grid_poly)
+                if not intersection.is_empty and intersection.is_valid:
+                    grids.append(intersection)
+
+    # Check if any grids were created
+    if not grids:
+        raise ValueError("No valid grid cells generated within the polygon")
+
+    # Create GeoDataFrame with explicit geometry column and CRS
+    gdf = gpd.GeoDataFrame(geometry=grids, crs="EPSG:4326")
+    # Explicitly set the geometry column to ensure it's active
+    gdf = gdf.set_geometry('geometry')
+    if gdf.crs is None:
+        raise ValueError("GeoDataFrame CRS is not set after initialization")
+    if gdf.geometry.name != 'geometry':
+        raise ValueError("Geometry column is not correctly set")
+
+    # Compute centroids
+    gdf['centroid'] = gdf.geometry.centroid
+    gdf['grid_index'] = gdf.index
+    return gdf
+
+def assign_buildings_to_grids(buildings_geojson, grid_gdf):
+    buildings_gdf = gpd.GeoDataFrame.from_features(buildings_geojson['features'], crs="EPSG:4326")
+
+    # Set centroids correctly
+    buildings_gdf['geometry'] = buildings_gdf.geometry.centroid
+    buildings_gdf = buildings_gdf.set_geometry('geometry')
+
+    # Perform spatial join WITHOUT renaming geometry
+    joined = gpd.sjoin(buildings_gdf, grid_gdf, how='left', predicate='within')
+
+    # Now count buildings per grid
+    building_counts = joined['index_right'].value_counts().reindex(grid_gdf.index, fill_value=0)
+    grid_gdf['building_count'] = building_counts
+
+    # Assign grid indices to buildings
+    buildings_geojson['features'] = [
+        {**f, 'properties': {**f['properties'], 'grid_index': int(joined['index_right'].iloc[i]) if not pd.isna(
+            joined['index_right'].iloc[i]) else -1}}
+        for i, f in enumerate(buildings_geojson['features'])
+    ]
+
+    return grid_gdf, buildings_geojson
+
+def grid_clustering(grid_centroids, building_counts, num_clusters, tolerance=0.1):
+    """
+    grid_centroids: np.array of shape (N, 2)
+    building_counts: np.array of building counts per grid
+    num_clusters: desired number of clusters
+    tolerance: allowable +/- tolerance in building counts per cluster
+    """
+    from sklearn.neighbors import NearestNeighbors
+
+    n_grids = len(grid_centroids)
+    assigned = np.full(n_grids, fill_value=-1)  # -1 means unassigned
+
+    total_buildings = building_counts.sum()
+    target_buildings_per_cluster = total_buildings / num_clusters
+    min_buildings = target_buildings_per_cluster * (1 - tolerance)
+    max_buildings = target_buildings_per_cluster * (1 + tolerance)
+
+    # Build a spatial index
+    nbrs = NearestNeighbors(n_neighbors=n_grids, algorithm='auto').fit(grid_centroids)
+
+    available_indices = set(range(n_grids))
+    cluster_id = 0
+
+    while available_indices and cluster_id < num_clusters:
+        # Pick the grid with the highest building count among unassigned
+        seed_idx = max(available_indices, key=lambda idx: building_counts[idx])
+
+        assigned[seed_idx] = cluster_id
+        available_indices.remove(seed_idx)
+
+        current_buildings = building_counts[seed_idx]
+
+        # Expand the cluster
+        distances, neighbors = nbrs.kneighbors([grid_centroids[seed_idx]], n_neighbors=n_grids)
+        for neighbor_idx in neighbors[0]:
+            if neighbor_idx in available_indices:
+                if current_buildings + building_counts[neighbor_idx] <= max_buildings:
+                    assigned[neighbor_idx] = cluster_id
+                    available_indices.remove(neighbor_idx)
+                    current_buildings += building_counts[neighbor_idx]
+
+            if current_buildings > target_buildings_per_cluster:
+                break
+
+        cluster_id += 1
+
+    # Any leftover grids (because of tolerance/rounding) assign to nearest cluster
+    for idx in available_indices:
+        # Assign to nearest existing cluster center
+        distances, neighbors = nbrs.kneighbors([grid_centroids[idx]], n_neighbors=n_grids)
+        for neighbor_idx in neighbors[0]:
+            neighbor_cluster = assigned[neighbor_idx]
+            if neighbor_cluster != -1:
+                assigned[idx] = neighbor_cluster
+                break
+
+    return assigned
+
+@app.route('/get_building_density_v2', methods=['POST'])
+def get_building_density_v2():
+    try:
+        data = request.get_json()
+        polygon_coords = data.get("polygon", [])
+        num_clusters = int(data.get("noOfClusters", 3))
+        tolerance = float(data.get("thresholdVal", 10)) / 100
+        grid_size = int(data.get("gridLength", 50))
+
+        if not polygon_coords:
+            return jsonify({"error": "Invalid polygon coordinates"}), 400
+
+        # Fetch buildings
+        buildings_geojson = getBuildingsDataFromDB_streamData(polygon_coords)
+        if not buildings_geojson['features']:
+            return jsonify({"message": "No buildings found within the polygon", "building_count": 0}), 404
+
+        # Generate grid
+        grid_gdf = generate_grid(polygon_coords, grid_size)
+
+        # Assign buildings to grids
+        grid_gdf, buildings_geojson = assign_buildings_to_grids(buildings_geojson, grid_gdf)
+
+        # Cluster grids
+        coords = np.array([[point.x, point.y] for point in grid_gdf.centroid])
+        weights = grid_gdf['building_count'].values
+        valid_mask = weights > 0
+
+        if not valid_mask.any():
+            return jsonify(
+                {"message": "No grids with buildings", "building_count": len(buildings_geojson['features'])}), 404
+
+        valid_coords = coords[valid_mask]
+        valid_weights = weights[valid_mask]
+        total_buildings = valid_weights.sum()
+        _, min_size, max_size = _calculate_cluster_sizes(total_buildings, num_clusters, tolerance)
+
+        labels = grid_clustering(valid_coords, valid_weights, num_clusters)
+
+        grid_gdf['cluster_label'] = -1
+        grid_gdf.loc[valid_mask, 'cluster_label'] = labels
+
+        # Assign cluster labels to buildings
+        grid_cluster_map = grid_gdf.set_index('grid_index')['cluster_label'].to_dict()
+        for feature in buildings_geojson['features']:
+            grid_index = feature['properties'].get('grid_index', -1)
+            feature['properties']['cluster_label'] = grid_cluster_map.get(grid_index, -1)
+
+        # Convert grids to GeoJSON, excluding the centroid column
+        grid_gdf_for_json = grid_gdf.drop(columns=['centroid'])  # Drop non-serializable centroid column
+        grid_geojson = json.loads(grid_gdf_for_json.to_json())
+
+        # Prepare clusters data
+        clusters = [
+            {
+                "coordinates": feature['properties']['longitude_latitude']['coordinates'],
+                "cluster": feature['properties']['cluster_label'],
+                "grid_index": feature['properties']['grid_index']
+            }
+            for feature in buildings_geojson['features']
+            if feature['properties']['cluster_label'] != -1
+        ]
+
+        return jsonify({
+            "building_count": len(buildings_geojson['features']),
+            "buildings": buildings_geojson,
+            "grids": grid_geojson,
+            "clusters": clusters
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
 # Run the Flask app
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5010, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)

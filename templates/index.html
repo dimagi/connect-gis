@@ -565,7 +565,7 @@
             } else if (method === "bottomUp") {
                 $('#noOfClustersIP, #noOfBuildingsIP').removeClass('d-none');
             }
-
+            toggleGridButtonsVisibility()
             $('#close-grid-details').off('click').on('click', () => reSizeMap(mapDefaultHeight, true));
         }
 
@@ -854,51 +854,12 @@
             return { type: "FeatureCollection", features };
         }
 
-        function reSizeMap(mapHeight, hideGrids) {
-            const mapElement = $('#map')[0];
-            mapElement.style.height = mapHeight;
-            mapElement.style.transition = 'height 0.3s ease';
-            setTimeout(() => map.invalidateSize(), 50);
-            $('#grid-details').attr('hidden', hideGrids);
-        }
-
-        function drawGrids(index, data) {
-
-            const polygonData = polygons[index];
-            const densityLayer = polygonData.densityLayer;
-            densityLayer.clearLayers();
-
-            const buildingLayer = polygonData.buildingsLayer;
-            buildingLayer.clearLayers();
-
-            polygonData.clusterLayer.clearLayers();
-            const gridAssignments = new Map();
-            const drawnGrids = [];
-            // Use Maps instead of arrays for processedData
-            const processedData = {
-                clusters: new Map(), // Map<clusterId, { clusterId, buildingCount }>
-                grids: new Map(),    // Map<gridIndex, { gridWKT, clusterId, buildingCount, geoJSON }>
-                buildings: new Map() // Map<buildingIndex, { ... }>
-            };
-            const assignedBuildings = new Set();
-            const allBuildings = turf.featureCollection(data.clusters.map(c => turf.point(c.coordinates)));
-
-            // Precompute spatial index for buildings
-            const buildingIndex = createBuildingIndex(allBuildings);
-
-            // Precompute cluster groups and boundaries
-            const clusterGroups = groupClusters(data.clusters);
-            const boundaries = computeBoundaries(clusterGroups);
-
-            // Generate grids efficiently
+        function createGrids(allBuildings, boundaries, polygonData) {
             const bbox = getExpandedBbox(allBuildings, 0.005);
             const gridSizeDeg = (parseInt($('#gridLength').val()) || 100) / 111000;
             const grid = generateSquareGrid(bbox, gridSizeDeg);
 
-            // Batch all grid features for a single L.geoJSON call
-            const gridFeatures = [];
-            // const assignedBuildingIndices = new Set();
-            // Step 1: Create non-overlapping and overlapping grid arrays
+            // Separate grids into non-overlapping and overlapping
             const nonOverlappingGrids = [];
             const overlappingGrids = [];
 
@@ -918,30 +879,83 @@
                 }
             });
 
-            // Step 2: Combine arrays
-            const allGrids = nonOverlappingGrids.concat(overlappingGrids);
+            return {
+                allGrids: nonOverlappingGrids.concat(overlappingGrids),
+                gridSizeDeg
+            };
+        }
 
-            // Step 4: Process all grids
-            allGrids.forEach(({ grid: currentGrid, gridIndex } ) => {
-                const majorityCluster = findMajorityCluster(currentGrid, boundaries, polygonData.avgBuildings);
-                if (!majorityCluster) {
-                    return;
-                }
+        function toggleGridButtonsVisibility() {
+            const clusteringType = $('#clusteringType').val();
+            const isKMeans = clusteringType === 'kMeans';
+
+            // Hide/show grid buttons based on clustering type
+            $('#get-grids, #clear-grids').toggleClass('d-none', isKMeans);
+
+            // Also update disabled state (optional)
+            if (isKMeans) {
+                enableOrDisableHtmlAttribute("get-grids", true);
+                enableOrDisableHtmlAttribute("clear-grids", true);
+                $('#run-clustering').text('Get Delivery Units');
+                $('#clear-clusters').text('Clear Delivery Units');
+            } else {
+                $('#run-clustering').text('Get Service Areas');
+                $('#clear-clusters').text('Clear Service Areas');
+            }
+        }
+
+
+        function reSizeMap(mapHeight, hideGrids) {
+            const mapElement = $('#map')[0];
+            mapElement.style.height = mapHeight;
+            mapElement.style.transition = 'height 0.3s ease';
+            setTimeout(() => map.invalidateSize(), 50);
+            $('#grid-details').attr('hidden', hideGrids);
+        }
+
+        function processGrids(options) {
+            const {
+                useBackendGrids,
+                backendGrids,
+                allBuildings,
+                boundaries,
+                polygonData,
+                processedData,
+                drawnGrids,
+                assignedBuildings,
+                buildingIndex,
+                data,
+                oaIndex
+            } = options;
+
+            const gridFeatures = [];
+
+            // Get the appropriate grid source based on the flag
+            const gridSource = useBackendGrids ?
+                backendGrids.features.map((grid, index) => ({ grid, gridIndex: index })) :
+                createGrids(allBuildings, boundaries, polygonData).allGrids;
+            gridSource.forEach(({ grid: currentGrid, gridIndex }) => {
+                // Determine majority cluster based on the source
+                const majorityCluster = useBackendGrids ?
+                    ""+currentGrid.properties.cluster_label :
+                    findMajorityCluster(currentGrid, boundaries, polygonData.avgBuildings);
+
+                if (!majorityCluster) return;
+
+                // Get buildings count based on the source
                 const buildingsInGrid = getBuildingsInGridFast(buildingIndex, allBuildings, currentGrid, assignedBuildings);
 
-
-                gridAssignments.set(gridIndex, { clusterId: majorityCluster });
                 currentGrid.properties.cluster = majorityCluster;
                 const hasBuildings = buildingsInGrid.features.length > 0;
                 const gridBuildingsCount = buildingsInGrid.features.length;
 
                 if (hasBuildings) {
-                    reassignAndDrawBuildings(index, buildingsInGrid, majorityCluster, data, assignedBuildings, processedData, drawnGrids.length + 1);
+                    reassignAndDrawBuildings(oaIndex, buildingsInGrid, majorityCluster, data, assignedBuildings, processedData, drawnGrids.length + 1);
                 }
 
-                const color = getColorForNumber(parseInt(majorityCluster));
+                // Set grid properties
                 currentGrid.properties.style = {
-                    color: color,
+                    color: getColorForNumber(parseInt(majorityCluster)),
                     weight: hasBuildings ? 1 : 0,
                     fillOpacity: hasBuildings ? 0.4 : 0,
                     opacity: hasBuildings ? 1 : 0
@@ -949,14 +963,12 @@
 
                 if (gridBuildingsCount > 0) {
                     currentGrid.properties.buildingCount = gridBuildingsCount;
+                    currentGrid.properties.cluster = majorityCluster;
                     const gridIndexNum = drawnGrids.length + 1;
                     drawnGrids.push({ grid: currentGrid });
 
-                    const geometry = currentGrid.geometry;
-                    const coords = geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
-                    const wkt = `POLYGON ((${coords}, ${geometry.coordinates[0][0][0]} ${geometry.coordinates[0][0][1]}))`;
-
-                    // Store grid in processedData.grids using gridIndexNum - 1 as the key
+                    // Store grid in processedData
+                    const wkt = convertGeoJSONToWKT(currentGrid.geometry);
                     processedData.grids.set(gridIndexNum - 1, {
                         gridWKT: wkt,
                         clusterId: majorityCluster,
@@ -966,7 +978,7 @@
 
                     currentGrid.properties.gridIndexNum = gridIndexNum;
 
-                    // Update cluster building count using Map
+                    // Update cluster data
                     const clusterId = parseInt(majorityCluster);
                     const clusterData = processedData.clusters.get(clusterId);
                     if (clusterData) {
@@ -980,6 +992,59 @@
 
                     gridFeatures.push(currentGrid);
                 }
+            });
+
+            return gridFeatures;
+        }
+
+        function convertGeoJSONToWKT(geometry) {
+            if (geometry.type === 'Polygon') {
+                const coords = geometry.coordinates[0].map(coord => `${coord[0]} ${coord[1]}`).join(', ');
+                return `POLYGON ((${coords}, ${geometry.coordinates[0][0][0]} ${geometry.coordinates[0][0][1]}))`;
+            }
+            return '';
+        }
+
+        function drawGrids(index, data, useBackendGrids = false) {
+
+            const polygonData = polygons[index];
+            const densityLayer = polygonData.densityLayer;
+            densityLayer.clearLayers();
+
+            const buildingLayer = polygonData.buildingsLayer;
+            buildingLayer.clearLayers();
+
+            polygonData.clusterLayer.clearLayers();
+            const drawnGrids = [];
+            // Use Maps instead of arrays for processedData
+            const processedData = {
+                clusters: new Map(), // Map<clusterId, { clusterId, buildingCount }>
+                grids: new Map(),    // Map<gridIndex, { gridWKT, clusterId, buildingCount, geoJSON }>
+                buildings: new Map() // Map<buildingIndex, { ... }>
+            };
+            const assignedBuildings = new Set();
+            const allBuildings = turf.featureCollection(data.clusters.map(c => turf.point(c.coordinates)));
+
+            // Precompute spatial index for buildings
+            const buildingIndex = createBuildingIndex(allBuildings);
+
+            // Precompute cluster groups and boundaries
+            const clusterGroups = groupClusters(data.clusters);
+            const boundaries = computeBoundaries(clusterGroups);
+
+            // Create grids using the extracted function
+            const gridFeatures = processGrids({
+                useBackendGrids,
+                backendGrids: data.grids,
+                allBuildings,
+                boundaries,
+                polygonData,
+                processedData,
+                drawnGrids,
+                assignedBuildings,
+                buildingIndex,
+                data,
+                oaIndex: index
             });
 
             // Single L.geoJSON call for all grids
@@ -1676,7 +1741,10 @@
                 dbType
             };
             showToast('Fetching data...', 'info', undefined, '#ff9300');
-            fetch(`${hostUrl}/get_building_density`, {
+            let url = 'get_building_density';
+            if (clusteringType === 'kMeans' && fetchClusters)
+                url = 'get_building_density_v2'
+            fetch(`${hostUrl}/${url}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(requestBody)
@@ -1708,6 +1776,9 @@
                         }
                         addBuildings(index, data);
                         updateSelectedPolygon();
+                        if(clusteringType === 'kMeans' && fetchClusters) {
+                            drawGrids(index, data, true)
+                        }
                     }
                 })
                 .catch(error => {
