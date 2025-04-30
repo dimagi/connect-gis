@@ -353,12 +353,12 @@
     <script>
         // Constants and Global Variables
         let hostUrl = "{{ host_url }}";
-        // hostUrl = "http://localhost:5000"
         let uploadedReportData = null;
         let polygons = [];
         let selectedPolygonIndex = -1;
         let pinLatLng = null;
         let mapDefaultHeight = '100%';
+        let selectedGridLayer = null;
 
         const defaultPolygonStyle = {
             color: '#3388ff', // Blue outline
@@ -674,6 +674,7 @@
             polygonData.clusterLayer.clearLayers();
             polygonData.clustersData = null;
             polygonData.clusterCount = 0;
+            resetGridColor()
             enableOrDisableHtmlAttribute("clear-clusters", true);
             enableOrDisableHtmlAttribute("get-grids", true);
             clearGrids(index);
@@ -911,9 +912,13 @@
             mapElement.style.transition = 'height 0.3s ease';
             setTimeout(() => map.invalidateSize(), 50);
             $('#grid-details').attr('hidden', hideGrids);
+            if(hideGrids) {
+                resetGridColor()
+            }
         }
 
         function processGrids(options) {
+            resetGridColor()
             const {
                 useBackendGrids,
                 backendGrids,
@@ -1005,6 +1010,19 @@
             return '';
         }
 
+        function resetGridColor() {
+            if (selectedGridLayer) {
+                const prevClusterId = parseInt(selectedGridLayer.feature.properties.cluster);
+                selectedGridLayer.setStyle({
+                    color: getColorForNumber(prevClusterId),
+                    weight: 1,
+                    fillOpacity: 0.4,
+                    opacity: 1
+                });
+            }
+            selectedGridLayer = null
+        }
+
         function drawGrids(index, data, useBackendGrids = false) {
 
             const polygonData = polygons[index];
@@ -1073,6 +1091,15 @@
                         }, { sticky: true, direction: 'auto', opacity: 0.9 });
 
                         layer.on('click', () => {
+                            resetGridColor()
+                            // Highlight the selected grid
+                            layer.setStyle({
+                                color: '#FFFF00', // Yellow for high visibility
+                                weight: 3,       // Thicker border
+                                fillOpacity: 0.4,
+                                opacity: 1
+                            });
+                            selectedGridLayer = layer;
                             reSizeMap('70%', false);
                             selectedGridIndex = feature.properties.gridIndexNum - 1;
                             const currentGridData = drawnGrids[selectedGridIndex].grid;
