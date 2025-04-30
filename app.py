@@ -183,7 +183,7 @@ def getBuildingsDataFromDB_streamData(polygon_coords):
             area_in_meters,
             confidence,
             record_id,
-            ST_AsGeoJSON(geometry) as geometry
+            ST_AsGeoJSON(ST_GeometryN(geometry, 1)) as geometry
         FROM buildings
         WHERE ST_Within(geometry, ST_GeomFromText(%s, 4326));
         """
