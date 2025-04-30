@@ -905,7 +905,6 @@
             }
         }
 
-
         function reSizeMap(mapHeight, hideGrids) {
             const mapElement = $('#map')[0];
             mapElement.style.height = mapHeight;
@@ -1276,68 +1275,59 @@
 
             // Update cluster count
             updateClusterCount(processedData, polygonData);
+            const drawnGrids = polygonData.drawnGrids;
+
+            setGridNeigboursInDropdown(newClusterId, drawnGrids[selectedGridIndex].grid, polygonData.clusterGroups, oaNumber-1, drawnGrids)
         }
 
         function setGridNeigboursInDropdown(currentCluster, currentGridData, clusterGroups, index, drawnGrids) {
-            const boundaries = computeBoundaries(clusterGroups);
             const dropdown = $('#neighbor-clusters');
             dropdown.empty();
 
             const neighborClusters = new Set();
-            const currentOption = $('<option>').val(currentCluster).text(`Service Area ${parseInt(currentCluster) + 1} (Current)`);
-            dropdown.append(currentOption);
+            dropdown.append($('<option>').val(currentCluster).text(`Service Area ${parseInt(currentCluster) + 1} (Current)`));
             neighborClusters.add(parseInt(currentCluster));
 
-            Object.entries(boundaries).forEach(([clusterId, boundary]) => {
-                if (turf.intersect(currentGridData, boundary)) {
-                    neighborClusters.add(parseInt(clusterId));
-                }
-            });
-
             const gridBbox = turf.bbox(currentGridData);
-            const gridWidth = gridBbox[2] - gridBbox[0];
-            const gridHeight = gridBbox[3] - gridBbox[1];
-            const adjacentOffsets = [
-                { dx: -gridWidth, dy: 0 },
-                { dx: gridWidth, dy: 0 },
-                { dx: 0, dy: gridHeight },
-                { dx: 0, dy: -gridHeight }
+            const gridWidth = (gridBbox[2] - gridBbox[0])/2;
+            const gridHeight = (gridBbox[3] - gridBbox[1])/2;
+
+            const directions = [
+                { dx: -gridWidth, dy: 0 },  // left
+                { dx: gridWidth, dy: 0 },   // right
+                { dx: 0, dy: -gridHeight }, // bottom
+                { dx: 0, dy: gridHeight }   // top
             ];
 
-            adjacentOffsets.forEach(offset => {
-                const adjacentGrid = turf.transformTranslate(
+            directions.forEach(({ dx, dy }) => {
+                const shiftedGrid = turf.transformTranslate(
                     currentGridData,
-                    Math.sqrt(offset.dx * offset.dx + offset.dy * offset.dy),
-                    Math.atan2(offset.dy, offset.dx) * 180 / Math.PI,
+                    Math.sqrt(dx * dx + dy * dy),
+                    Math.atan2(dy, dx) * 180 / Math.PI,
                     { units: 'degrees' }
                 );
 
-                let assignedCluster = null;
-                for (let i = 0; i < drawnGrids.length; i++) {
-                    const drawnGrid = drawnGrids[i].grid;
-                    if (turf.booleanEqual(adjacentGrid, drawnGrid)) {
-                        assignedCluster = parseInt(drawnGrid.cluster);
-                        break;
+                drawnGrids.forEach(({ grid }) => {
+                    if (turf.booleanIntersects(shiftedGrid, grid)) {
+                        const clusterId = parseInt(grid.properties.cluster);
+                        neighborClusters.add(clusterId);
                     }
-                }
-
-                if (assignedCluster !== null) {
-                    neighborClusters.add(assignedCluster);
-                } else {
-                    const majorityCluster = findMajorityCluster(adjacentGrid, boundaries, polygons[index].avgBuildingCount);
-                    if (majorityCluster !== null) {
-                        neighborClusters.add(parseInt(majorityCluster));
-                    }
-                }
+                });
             });
 
             Array.from(neighborClusters)
                 .filter(clusterId => clusterId !== parseInt(currentCluster))
                 .sort((a, b) => a - b)
                 .forEach(clusterId => {
-                    const option = $('<option>').val(clusterId).text(`Service Area ${parseInt(clusterId) + 1}`);
+                    const color = getColorForNumber(clusterId);
+                    const optionText = `\u25A0 Service Area ${clusterId + 1}`; // Unicode square
+                    const option = $('<option>')
+                        .val(clusterId)
+                        .text(optionText)
+                        .css('color', color); // Color the text (square)
                     dropdown.append(option);
                 });
+
         }
 
         function groupClusters(clusters) {
