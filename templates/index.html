@@ -1953,7 +1953,7 @@
                 const polygonData = polygons[index];
 
                 // Find the corresponding grid layer (L.geoJSON layer)
-                polygonData.gridLayer.eachLayer((layer) => {
+                polygonData?.gridLayer?.eachLayer((layer) => {
                     const feature = layer?.options?.feature;
                     if (feature?.gridIndex === selectedIndex) {
                         handleGridClick(layer, layer.feature, index, false);
