@@ -602,6 +602,9 @@ def grid_clustering(grid_centroids, building_counts, num_clusters, tolerance=0.1
     from sklearn.neighbors import NearestNeighbors
 
     n_grids = len(grid_centroids)
+    if n_grids < num_clusters:
+        raise ValueError(f"Cannot create {num_clusters} clusters with only {n_grids} grids")
+
     assigned = np.full(n_grids, fill_value=-1)  # -1 means unassigned
 
     total_buildings = building_counts.sum()
@@ -611,41 +614,70 @@ def grid_clustering(grid_centroids, building_counts, num_clusters, tolerance=0.1
 
     # Build a spatial index
     nbrs = NearestNeighbors(n_neighbors=n_grids, algorithm='auto').fit(grid_centroids)
-
     available_indices = set(range(n_grids))
-    cluster_id = 0
 
-    while available_indices and cluster_id < num_clusters:
-        # Pick the grid with the highest building count among unassigned
-        seed_idx = max(available_indices, key=lambda idx: building_counts[idx])
+    def expand_cluster(cluster_id, seed_idx, building_limit, stop_at_limit=False):
+        """
+        Expand a cluster by adding nearby grids until reaching building_limit.
+        If stop_at_limit=True, stop once building_limit is reached or exceeded.
+        If stop_at_limit=False, only add grids if the total stays <= building_limit.
+        """
+        current_buildings = building_counts[np.where(assigned == cluster_id)].sum()
+        if current_buildings >= building_limit:
+            return current_buildings
 
-        assigned[seed_idx] = cluster_id
-        available_indices.remove(seed_idx)
-
-        current_buildings = building_counts[seed_idx]
-
-        # Expand the cluster
         distances, neighbors = nbrs.kneighbors([grid_centroids[seed_idx]], n_neighbors=n_grids)
         for neighbor_idx in neighbors[0]:
             if neighbor_idx in available_indices:
-                if current_buildings + building_counts[neighbor_idx] <= max_buildings:
-                    assigned[neighbor_idx] = cluster_id
-                    available_indices.remove(neighbor_idx)
-                    current_buildings += building_counts[neighbor_idx]
+                next_buildings = current_buildings + building_counts[neighbor_idx]
+                if stop_at_limit:
+                    # Add grid if under limit or to reach/exceed limit
+                    if next_buildings <= building_limit or current_buildings < building_limit:
+                        assigned[neighbor_idx] = cluster_id
+                        available_indices.remove(neighbor_idx)
+                        current_buildings = next_buildings
+                    if current_buildings >= building_limit:
+                        break
+                else:
+                    # Only add if total stays <= limit
+                    if next_buildings <= building_limit:
+                        assigned[neighbor_idx] = cluster_id
+                        available_indices.remove(neighbor_idx)
+                        current_buildings = next_buildings
+                    else:
+                        break
+        return current_buildings
 
-            if current_buildings > target_buildings_per_cluster:
-                break
+    # First Iteration: Initialize each cluster to min_buildings
+    cluster_id = 0
+    while available_indices and cluster_id < num_clusters:
+        # Pick the grid with the highest building count as the seed
+        seed_idx = max(available_indices, key=lambda idx: building_counts[idx])
+        assigned[seed_idx] = cluster_id
+        available_indices.remove(seed_idx)
 
+        # Expand to min_buildings
+        expand_cluster(cluster_id, seed_idx, min_buildings, stop_at_limit=True)
         cluster_id += 1
 
-    # Any leftover grids (because of tolerance/rounding) assign to nearest cluster
-    for idx in available_indices:
-        # Assign to nearest existing cluster center
+    # Second Iteration: Expand clusters to target_buildings_per_cluster
+    for cluster_id in range(num_clusters):
+        seed_idx = np.where(assigned == cluster_id)[0][0]
+        expand_cluster(cluster_id, seed_idx, target_buildings_per_cluster, stop_at_limit=True)
+
+    # Third Iteration: Expand clusters to max_buildings
+    for cluster_id in range(num_clusters):
+        seed_idx = np.where(assigned == cluster_id)[0][0]
+        expand_cluster(cluster_id, seed_idx, max_buildings, stop_at_limit=False)
+
+    # Assign any remaining grids to the nearest cluster
+    for idx in list(available_indices):
         distances, neighbors = nbrs.kneighbors([grid_centroids[idx]], n_neighbors=n_grids)
         for neighbor_idx in neighbors[0]:
             neighbor_cluster = assigned[neighbor_idx]
             if neighbor_cluster != -1:
                 assigned[idx] = neighbor_cluster
+                available_indices.remove(idx)
                 break
 
     return assigned
