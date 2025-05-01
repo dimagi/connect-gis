@@ -239,12 +239,12 @@
                                 <p id="info">Buildings in selected OA: <span id="building-count">0</span></p>
                                 <p id="clusterCount">Service Areas Created: <span id="cluster-count-val">0</span></p>
                                 <div class="mb-3">
-                                <label for="select-sa" class="form-label">Select Service Area:</label>
-                                <select id="select-sa" class="form-select select2" style="width: 100%"></select>
+                                    <label for="select-sa" class="form-label">Select Service Area:</label>
+                                    <select id="select-sa" class="form-select select2" style="width: 100%"></select>
                                 </div>
                                 <div class="mb-3">
-                                <label for="select-du" class="form-label">Select Grids:</label>
-                                <select id="select-du" class="form-select select2" style="width: 100%"></select>
+                                    <label for="select-du" class="form-label">Select Grids:</label>
+                                    <select id="select-du" class="form-select select2" style="width: 100%"></select>
                                 </div>
 
                             </div>
@@ -297,7 +297,7 @@
                                         <button class="btn btn-success w-100" id="run-clustering" disabled>Get Service Areas</button>
                                     </div>
                                     <div class="col-6">
-                                        <button class="btn btn-warning w-100" onclick="clearClusters(false)" id="clear-clusters" disabled>Clear Service Areas</button>
+                                        <button class="btn btn-warning w-100" onclick="clearClusters(selectedPolygonIndex, false)" id="clear-clusters" disabled>Clear Service Areas</button>
                                     </div>
                                     <div class="col-6">
                                         <button class="btn btn-success w-100" id="get-grids" disabled>Get Delivery Units</button>
@@ -484,10 +484,10 @@
                 $('#total-building-count').text(totalBuildingCount ?? 0);
                 enableOrDisableHtmlAttribute("run-clustering", false);
                 enableOrDisableHtmlAttribute("clear-oa", false);
-                enableOrDisableHtmlAttribute("get-grids", selectedPolygon.clustersData ? false : true);
-                enableOrDisableHtmlAttribute("clear-clusters", selectedPolygon.clustersData ? false : true);
-                enableOrDisableHtmlAttribute("clear-grids", selectedPolygon.gridsDataExists ? false : true);
-
+                enableOrDisableHtmlAttribute("get-grids", !selectedPolygon.clustersData);
+                enableOrDisableHtmlAttribute("clear-clusters", !selectedPolygon.clustersData);
+                enableOrDisableHtmlAttribute("clear-grids", !selectedPolygon.gridsDataExists);
+                showOrHideGridAndClusterSelectIp(!selectedPolygon.gridsDataExists)
                 // Simplified enabling/disabling logic for download options
                 const polygonExists = true; // A polygon is selected
                 const gridsExist = selectedPolygon.gridsDataExists;
@@ -563,7 +563,12 @@
         }
 
         function enableOrDisableHtmlAttribute(id, value, attribute = 'disabled') {
-            $('#' + id).prop(attribute, value);
+            const $element = $('#' + id);
+            if (value) {
+                $element.attr(attribute, true);
+            } else {
+                $element.removeAttr(attribute);
+            }
         }
 
         function toggleInputFields() {
@@ -580,6 +585,7 @@
             }
             toggleGridButtonsVisibility()
             $('#close-grid-details').off('click').on('click', () => reSizeMap(mapDefaultHeight, true));
+            showOrHideGridAndClusterSelectIp(true)
         }
 
         // Map Data Functions
@@ -703,10 +709,11 @@
             enableOrDisableHtmlAttribute("download-csv-commcare", true);
             enableOrDisableHtmlAttribute("download-oa-wkt", false);
             enableOrDisableHtmlAttribute("download-btn", false);
-            $('#grid-details').attr('hidden', true);
+            enableOrDisableHtmlAttribute('grid-details', false, 'hidden')
             polygonData.processedData = { clusters: new Map(), grids: new Map(), buildings: new Map() };
             reSizeMap(mapDefaultHeight, true);
             clearGridAndClusterSelectIp()
+            showOrHideGridAndClusterSelectIp(true)
         }
 
         function resetFields() {
@@ -924,7 +931,7 @@
             mapElement.style.height = mapHeight;
             mapElement.style.transition = 'height 0.3s ease';
             setTimeout(() => map.invalidateSize(), 50);
-            $('#grid-details').attr('hidden', hideGrids);
+            enableOrDisableHtmlAttribute('grid-details', false, 'hidden')
             if(hideGrids) {
                 resetGridColor()
                 clearGridAndClusterSelectIp()
@@ -934,6 +941,16 @@
         function clearGridAndClusterSelectIp() {
                 $('#select-du').val(null).trigger('change.select2');
                 $('#select-sa').val(null).trigger('change.select2');
+        }
+
+        function showOrHideGridAndClusterSelectIp(hidden) {
+            if (hidden) {
+                $('#select-sa').closest('.mb-3').hide();
+                $('#select-du').closest('.mb-3').hide();
+            } else {
+                $('#select-sa').closest('.mb-3').show();
+                $('#select-du').closest('.mb-3').show();
+            }
         }
 
         function processGrids(options) {
@@ -1043,6 +1060,13 @@
         }
 
         function handleGridClick(layer, feature, index, clickedFromUI) {
+            if(index !== selectedPolygonIndex) {
+                selectedPolygonIndex = index;
+                $('#polygonSelect').val(selectedPolygonIndex);
+                updateSelectedPolygon()
+                populateClusterDropdown(selectedPolygonIndex)
+            }
+
             resetGridColor();
 
             layer.setStyle({
@@ -1067,7 +1091,6 @@
 
             setGridNeigboursInDropdown(currentCluster, currentGridData, polygons[index].clusterGroups, index, polygons[index].drawnGrids);
             reSizeMap('70%', false);
-
             if (clickedFromUI) {
                 selectClusterAndGridProgramatically(currentCluster, selectedGridIndex)
             }
@@ -1213,7 +1236,8 @@
             enableOrDisableHtmlAttribute("clear-grids", false);
             enableOrDisableHtmlAttribute("download-csv-my-maps", false);
             enableOrDisableHtmlAttribute("download-csv-commcare", false);
-            populateClusterDropdown(index);
+            populateClusterDropdown(index)
+            showOrHideGridAndClusterSelectIp(false)
         }
 
         function updateClusterBuildingCounts(processedData, oldClusterId, newClusterId, buildingCount) {
@@ -2080,12 +2104,3 @@
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 </body>
 </html>
-
-// TODO:
-/*
-4. Multi polygon select.
-    4.1. When the OA is changed from the MAP, i need to udpate the OA in the dropdown and update
-    4.2. When the OA is updated, we need reset the cluster and grids options also in the dropdown.
-5. Hide fields till the grids are drawn.
-6. Clear the values when the clear cluster or clear grid is called.
-*/
