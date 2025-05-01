@@ -1907,9 +1907,11 @@
             // Add an empty option for the placeholder
             clusterSelect.append(new Option('', '', true, true));
 
-            // Populate options from clusterMap
+            // Populate options from clusterMap, sorted by clusterId
             const clusterMap = polygons[index].processedData.clusters;
-            clusterMap.forEach((cluster, clusterId) => {
+            // Convert clusterMap to an array and sort by clusterId
+            const sortedClusters = Array.from(clusterMap.entries()).sort((a, b) => a[0] - b[0]);
+            sortedClusters.forEach(([clusterId, cluster]) => {
                 const label = `Service Area ${parseInt(clusterId) + 1} (${cluster.buildingCount} buildings)`;
                 clusterSelect.append(new Option(label, clusterId));
             });
@@ -1920,12 +1922,18 @@
                 allowClear: true,
                 width: 'resolve'
             });
-            clusterSelect.on('change.select2', function (e) {
+
+            // Handle selection change
+            clusterSelect.on('change.select2', function () {
                 const selectedValue = $(this).val();
-                populateGridDropdown(index, parseInt(selectedValue));
+                if (selectedValue) {
+                    populateGridDropdown(index, parseInt(selectedValue));
+                }
             });
-            clusterSelect.on('select2:clear', function (e) {
-                reSizeMap(mapDefaultHeight, true)
+
+            // Handle clear event
+            clusterSelect.on('select2:clear', function () {
+                reSizeMap(mapDefaultHeight, true);
             });
         }
 
