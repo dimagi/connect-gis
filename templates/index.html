@@ -1924,6 +1924,9 @@
                 const selectedValue = $(this).val();
                 populateGridDropdown(index, parseInt(selectedValue));
             });
+            clusterSelect.on('select2:clear', function (e) {
+                reSizeMap(mapDefaultHeight, true)
+            });
         }
 
         function populateGridDropdown(index, clusterId) {
@@ -1956,6 +1959,10 @@
                         handleGridClick(layer, layer.feature, index, false);
                     }
                 });
+            });
+
+            gridSelect.on('select2:clear', function (e) {
+                reSizeMap(mapDefaultHeight, true)
             });
         }
 
