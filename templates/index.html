@@ -371,6 +371,7 @@
         let mapDefaultHeight = '100%';
         let selectedGridLayer = null;
         const allowMultiSelect = false; 
+        const DISABLE_COLOR = "#A9A9A9"; // Disabled color for buildings and non-selected clusters
 
         const defaultPolygonStyle = {
             color: '#3388ff', // Blue outline
@@ -557,9 +558,32 @@
         }
 
         function getColorForNumber(num) {
-            if (num == null || num == undefined) return "black";
-            const hue = (num * 137) % 360;
-            return `hsl(${hue}, 90%, 50%)`;
+            if (num == null || num == undefined) return "#808080"; // Return gray for invalid numbers
+            // A palette of 94 visually distinct colors using color wheel approach
+            const accentColors = [
+                // Tertiary Colors (6 colors)
+                '#FF8000', // Orange
+                '#80FF00', // Chartreuse
+                '#0080FF', // Azure
+                '#8000FF', // Violet
+                '#FF0080', // Rose
+                '#00FF80', // Spring Green
+                // Additional Distinct Colors (88 colors)
+                '#FF4000', '#FF8000', '#FFBF00', '#FFFF00', '#BFFF00', '#80FF00', '#40FF00', '#00FF00',
+                '#00FF40', '#00FF80', '#00FFBF', '#00FFFF', '#00BFFF', '#0080FF', '#0040FF', '#0000FF',
+                '#4000FF', '#8000FF', '#BF00FF', '#FF00FF', '#FF00BF', '#FF0080', '#FF0040', '#FF0000',
+                '#FF3333', '#FF6633', '#FF9933', '#FFCC33', '#FFFF33', '#CCFF33', '#99FF33', '#66FF33',
+                '#33FF33', '#33FF66', '#33FF99', '#33FFCC', '#33FFFF', '#33CCFF', '#3399FF', '#3366FF',
+                '#3333FF', '#6633FF', '#9933FF', '#CC33FF', '#FF33FF', '#FF33CC', '#FF3399', '#FF3366',
+                '#FF3333', '#FF6666', '#FF9999', '#FFCCCC', '#FFFFCC', '#CCFFCC', '#99FFCC', '#66FFCC',
+                '#33FFCC', '#33FF99', '#33FF66', '#33FF33', '#66FF33', '#99FF33', '#CCFF33', '#FFFF33',
+                '#FFCC33', '#FF9933', '#FF6633', '#FF3333', '#FF3366', '#FF3399', '#FF33CC', '#FF33FF',
+                '#CC33FF', '#9933FF', '#6633FF', '#3333FF', '#3366FF', '#3399FF', '#33CCFF', '#33FFFF',
+                '#33CCFF', '#3399FF', '#3366FF', '#3333FF', '#6633FF', '#9933FF', '#CC33FF', '#FF33FF'
+            ];
+            // Ensure the number is within 0-94 range
+            const index = Math.abs(num) % 94;
+            return accentColors[index];
         }
 
         function enableOrDisableHtmlAttribute(id, value, attribute = 'disabled') {
@@ -679,6 +703,7 @@
             $('#uploaded-file-name').text('No File Chosen');
             updatePolygonDropdown();
             selectedPolygonIndex = -1;
+            selectedGridLayer = null;
             $('#building-count').text(0);
             $('#cluster-count-val').text(0);
         }
@@ -780,7 +805,7 @@
                 style: (feature) => ({
                     color: getColorForNumber(feature?.properties?.clusterId),
                     weight: 1,
-                    fillColor: getColorForNumber(feature.properties.clusterId),
+                    fillColor: getColorForNumber(feature?.properties?.clusterId),
                     fillOpacity: 0.9,
                     interactive: false
                 }),
@@ -998,7 +1023,7 @@
                 currentGrid.properties.style = {
                     color: getColorForNumber(parseInt(majorityCluster)),
                     weight: hasBuildings ? 1 : 0,
-                    fillOpacity: hasBuildings ? 0.4 : 0,
+                    fillOpacity: hasBuildings ? 0.5 : 0,
                     opacity: hasBuildings ? 1 : 0
                 };
 
@@ -1047,16 +1072,21 @@
         }
 
         function resetGridColor() {
-            if (selectedGridLayer) {
-                const prevClusterId = parseInt(selectedGridLayer.feature.properties.cluster);
-                selectedGridLayer.setStyle({
-                    color: getColorForNumber(prevClusterId),
-                    weight: 1,
-                    fillOpacity: 0.4,
-                    opacity: 1
+            if (selectedGridLayer && selectedPolygonIndex !== undefined && 
+                polygons[selectedPolygonIndex] && polygons[selectedPolygonIndex].gridLayer) {
+                const gridLayer = polygons[selectedPolygonIndex].gridLayer;
+                // Reset all grids to their original colors and opacity
+                gridLayer.eachLayer((layer) => {
+                    const layerClusterId = parseInt(layer.feature.properties.cluster);
+                    layer.setStyle({
+                        color: getColorForNumber(layerClusterId),
+                        weight: 1,
+                        fillOpacity: 0.5,
+                        opacity: 1
+                    });
                 });
             }
-            selectedGridLayer = null
+            selectedGridLayer = null;
         }
 
         function handleGridClick(layer, feature, index, clickedFromUI) {
@@ -1069,19 +1099,44 @@
 
             resetGridColor();
 
-            layer.setStyle({
-                color: '#FFFF00', // Yellow highlight
-                weight: 3,
-                fillOpacity: 0.4,
-                opacity: 1
-            });
-
             selectedGridLayer = layer;
             selectedGridIndex = feature.properties.gridIndexNum - 1;
 
             const currentGridData = polygons[index].drawnGrids[selectedGridIndex].grid;
-            const currentCluster = currentGridData.properties.cluster;
+            const currentCluster = parseInt(currentGridData.properties.cluster);
             const currentBuildingCount = currentGridData.properties.buildingCount;
+
+            // Highlight all grids in the same cluster with black and adjust opacity for other clusters
+            const gridLayer = polygons[index].gridLayer;
+            gridLayer.eachLayer((clusterLayer) => {
+                const layerClusterId = parseInt(clusterLayer.feature.properties.cluster);
+                if (layerClusterId === currentCluster && (clusterLayer.feature.properties.gridIndexNum != selectedGridIndex+1)) {
+                    // Highlight current cluster
+                    clusterLayer.setStyle({
+                        color: '#000000', // Black
+                        weight: 2,
+                        fillOpacity: 0.5,
+                        opacity: 1
+                    });
+                } else {
+                    // Make other clusters lighter
+                    clusterLayer.setStyle({
+                        color: DISABLE_COLOR,
+                        weight: 1,
+                        fillOpacity: 0.2, // Reduced opacity for non-selected clusters
+                        opacity: 1
+                    });
+                }
+            });
+
+            // Highlight the clicked grid in yellow
+            layer.setStyle({
+                color: '#FFFF00', // Yellow highlight
+                weight: 2,
+                fillOpacity: 0.5,
+                fillColor: "#FFFF00",
+                opacity: 1
+            });
 
             $('#grid-no').text(`Delivery Unit: ${feature.properties.gridIndexNum}`);
             $('#cluster-no').text(`Service Area: ${parseInt(currentCluster) + 1}`);
@@ -1194,12 +1249,12 @@
                 L.geoJSON(buildingsGeoJSON, {
                     style: (feature) => {
                         const clusterId = parseInt(feature.properties.cluster_label);
-                        const color = getColorForNumber(clusterId) || '#000000'; // Fallback to black if color is undefined
+                        const color = getColorForNumber(clusterId) || DISABLE_COLOR; // Fallback to default color if color is undefined
                         return {
-                            color: 'black',
+                            color: DISABLE_COLOR,
                             weight: 1,
-                            fillColor: color,
-                            fillOpacity: 0.9,
+                            fillColor: DISABLE_COLOR,
+                            fillOpacity: 0.5,
                             interactive: false
                         };
                     },
