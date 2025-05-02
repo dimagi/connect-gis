@@ -244,9 +244,16 @@
                                 </div>
                                 <div class="mb-3">
                                     <label for="select-du" class="form-label">Select Grids:</label>
-                                    <select id="select-du" class="form-select select2" style="width: 100%"></select>
+                                    <select id="select-du" class="form-select select2" style="width: 100%;" multiple></select>
                                 </div>
-
+                                <div class="mb-3" id="reassign-multi-grid" hidden>
+                                    <label for="select-reassign-sa" class="form-label">Reassign to Cluster:</label>
+                                    <select id="select-reassign-sa" class="form-select select2" style="width: 100%"></select>
+                                    <p></p>
+                                    <button class="btn btn-success w-50" id="reassign-multigrid-cluster"
+                                            onclick="reassignMultiGrid()">Reassign
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
@@ -370,8 +377,7 @@
         let pinLatLng = null;
         let mapDefaultHeight = '100%';
         let selectedGridLayer = null;
-        const allowMultiSelect = false; 
-
+        let multiSelectedGridLayers = []
         const defaultPolygonStyle = {
             color: '#3388ff', // Blue outline
             weight: 1,
@@ -714,6 +720,7 @@
             reSizeMap(mapDefaultHeight, true);
             clearGridAndClusterSelectIp()
             showOrHideGridAndClusterSelectIp(true)
+            multiSelectedGridLayers = []
         }
 
         function resetFields() {
@@ -926,7 +933,7 @@
             }
         }
 
-        function reSizeMap(mapHeight, hideGrids) {
+        function reSizeMap(mapHeight, hideGrids, clearSelectGrids = true) {
             const mapElement = $('#map')[0];
             mapElement.style.height = mapHeight;
             mapElement.style.transition = 'height 0.3s ease';
@@ -934,7 +941,9 @@
             enableOrDisableHtmlAttribute('grid-details', false, 'hidden')
             if(hideGrids) {
                 resetGridColor()
-                clearGridAndClusterSelectIp()
+                if(clearSelectGrids) {
+                    clearGridAndClusterSelectIp()
+                }
             }
         }
 
@@ -947,9 +956,9 @@
             if (hidden) {
                 $('#select-sa').closest('.mb-3').hide();
                 $('#select-du').closest('.mb-3').hide();
+                enableOrDisableHtmlAttribute('reassign-multi-grid', true, 'hidden')
             } else {
                 $('#select-sa').closest('.mb-3').show();
-                $('#select-du').closest('.mb-3').show();
             }
         }
 
@@ -987,6 +996,7 @@
                 const buildingsInGrid = getBuildingsInGridFast(buildingIndex, allBuildings, currentGrid, assignedBuildings);
 
                 currentGrid.properties.cluster = majorityCluster;
+                currentGrid.properties.oaIndex = oaIndex;
                 const hasBuildings = buildingsInGrid.features.length > 0;
                 const gridBuildingsCount = buildingsInGrid.features.length;
 
@@ -1049,14 +1059,18 @@
         function resetGridColor() {
             if (selectedGridLayer) {
                 const prevClusterId = parseInt(selectedGridLayer.feature.properties.cluster);
-                selectedGridLayer.setStyle({
-                    color: getColorForNumber(prevClusterId),
-                    weight: 1,
-                    fillOpacity: 0.4,
-                    opacity: 1
-                });
+                setGridColor(selectedGridLayer, getColorForNumber(prevClusterId), 1)
             }
             selectedGridLayer = null
+        }
+
+        function setGridColor(layer, color, weight) {
+            layer.setStyle({
+                color: color,
+                weight: weight,
+                fillOpacity: 0.4,
+                opacity: 1
+            });
         }
 
         function handleGridClick(layer, feature, index, clickedFromUI) {
@@ -1068,13 +1082,7 @@
             }
 
             resetGridColor();
-
-            layer.setStyle({
-                color: '#FFFF00', // Yellow highlight
-                weight: 3,
-                fillOpacity: 0.4,
-                opacity: 1
-            });
+            setGridColor(layer, '#FFFF00', 3)
 
             selectedGridLayer = layer;
             selectedGridIndex = feature.properties.gridIndexNum - 1;
@@ -1092,16 +1100,20 @@
             setGridNeigboursInDropdown(currentCluster, currentGridData, polygons[index].clusterGroups, index, polygons[index].drawnGrids);
             reSizeMap('70%', false);
             if (clickedFromUI) {
-                selectClusterAndGridProgramatically(currentCluster, selectedGridIndex)
+                selectClusterAndGridProgramatically(currentCluster, [selectedGridIndex], null)
             }
         }
 
-        function selectClusterAndGridProgramatically(currentCluster, selectedGridIndex) {
+        function selectClusterAndGridProgramatically(currentCluster, selectedGridIndex, reassignClusterId) {
             $('#select-sa').val(currentCluster).trigger('change.select2');
             // 2. After cluster dropdown updates, wait a moment then set DU
             setTimeout(() => {
                 $('#select-du').val(selectedGridIndex).trigger('change.select2');  // just update Select2 UI
             }, 100);
+
+            if(reassignClusterId != null || reassignClusterId !== undefined) {
+                $('#select-reassign-sa').val(reassignClusterId).trigger('change.select2');
+            }
         }
 
         function drawGrids(index, data, useBackendGrids = false) {
@@ -1314,34 +1326,61 @@
             $('#cluster-count-val').text(clusterCount);
         }
 
-        function reassignGridToCluster() {
-            const newClusterId = parseInt($('#neighbor-clusters').val());
-            const oaNumber = parseInt($('#oa-no').text().replace('OA: ', ''));
-            const polygonData = polygons[oaNumber-1];
+        function reassignMultiGrid() {
+            const oaNumber = parseInt($('#oa-no').text().replace('OA: ', '')) -1;
+            if ($('#select-reassign-sa').val() === ''){
+                showToast(`Error: Please select reassignment cluster`, "error", 3000, "#FF0000");
+                return
+            }
+            const newClusterId = parseInt($('#select-reassign-sa').val());
+            const oldClusterId = parseInt($('#select-sa').val());
+
+            if (oldClusterId === newClusterId){
+                showToast(`Error: Initial Cluster and New Cluster can't be same for reassignment`, "error", 3000, "#FF0000");
+                return
+            }
+            const currentGridIndexList = []
+            multiSelectedGridLayers.forEach(layer => {
+                const currentGridIndex = layer.feature.properties.gridIndexNum -1;
+                currentGridIndexList.push(currentGridIndex)
+                reassignGrid(newClusterId, oaNumber, currentGridIndex, false);
+            })
+            populateClusterDropdown(oaNumber)
+            selectClusterAndGridProgramatically(newClusterId, currentGridIndexList, newClusterId)
+            showToast(`Multiple DUs reassigned successfully`, "success", 2000, "#4CAF50");
+        }
+
+        function reassignGrid(newClusterId, oaNumber, currentGridIndex, updateUI) {
+            const polygonData = polygons[oaNumber];
             const processedData = polygonData.processedData;
-            const gridData = processedData.grids.get(selectedGridIndex);
+            const gridData = processedData.grids.get(currentGridIndex);
             const oldClusterId = parseInt(gridData.clusterId);
             const buildingCount = gridData.buildingCount;
 
             // Update clusterId in grid data
             gridData.clusterId = newClusterId;
-            processedData.grids.set(selectedGridIndex, gridData);
-            polygonData.drawnGrids[selectedGridIndex].grid.properties.cluster = newClusterId;
+            processedData.grids.set(currentGridIndex, gridData);
+            polygonData.drawnGrids[currentGridIndex].grid.properties.cluster = newClusterId;
 
             // Update building counts
             updateClusterBuildingCounts(processedData, oldClusterId, newClusterId, buildingCount);
-            updateGridLayer(polygonData.gridLayer, selectedGridIndex, newClusterId, processedData, getColorForNumber, oldClusterId);
+            updateGridLayer(polygonData.gridLayer, currentGridIndex, newClusterId, processedData, getColorForNumber, oldClusterId);
+            const drawnGrids = polygonData.drawnGrids;
+            setGridNeigboursInDropdown(newClusterId, drawnGrids[currentGridIndex].grid, polygonData.clusterGroups, oaNumber, drawnGrids)
 
             // Update UI
-            $('#cluster-no').text(`Service Area: ${newClusterId + 1}`);
-            $('#grid-color').html(`Service Area Color: <span class="color-box" style="background-color: ${getColorForNumber(newClusterId)};"></span>`);
+            if(updateUI) {
+                $('#cluster-no').text(`Service Area: ${newClusterId + 1}`);
+                $('#grid-color').html(`Service Area Color: <span class="color-box" style="background-color: ${getColorForNumber(newClusterId)};"></span>`);
+                selectClusterAndGridProgramatically(newClusterId, [currentGridIndex], null)
+            }
+        }
 
-            // Update cluster count
-            updateClusterCount(processedData, polygonData);
-            const drawnGrids = polygonData.drawnGrids;
-
-            setGridNeigboursInDropdown(newClusterId, drawnGrids[selectedGridIndex].grid, polygonData.clusterGroups, oaNumber-1, drawnGrids)
-            selectClusterAndGridProgramatically(newClusterId, selectedGridIndex)
+        function reassignGridToCluster() {
+            const newClusterId = parseInt($('#neighbor-clusters').val());
+            const oaNumber = parseInt($('#oa-no').text().replace('OA: ', '')) -1;
+            reassignGrid(newClusterId, oaNumber, selectedGridIndex, true)
+            showToast(`DU reassigned successfully`, "success", 2000, "#4CAF50");
         }
 
         function setGridNeigboursInDropdown(currentCluster, currentGridData, clusterGroups, index, drawnGrids) {
@@ -1900,12 +1939,14 @@
 
         function populateClusterDropdown(index) {
             const clusterSelect = $('#select-sa');
-
+            const gridReassignmentSelect = $('#select-reassign-sa');
             // Clear existing options
             clusterSelect.empty();
+            gridReassignmentSelect.empty();
 
             // Add an empty option for the placeholder
             clusterSelect.append(new Option('', '', true, true));
+            gridReassignmentSelect.append(new Option('', '', true, true));
 
             // Populate options from clusterMap, sorted by clusterId
             const clusterMap = polygons[index].processedData.clusters;
@@ -1914,6 +1955,7 @@
             sortedClusters.forEach(([clusterId, cluster]) => {
                 const label = `Service Area ${parseInt(clusterId) + 1} (${cluster.buildingCount} buildings)`;
                 clusterSelect.append(new Option(label, clusterId));
+                gridReassignmentSelect.append(new Option(label, clusterId));
             });
 
             // Initialize or reinitialize Select2
@@ -1921,6 +1963,12 @@
                 placeholder: 'Select a cluster...',
                 allowClear: true,
                 width: 'resolve'
+            });
+
+            // Initialize or reinitialize Select2
+            gridReassignmentSelect.select2({
+                placeholder: 'Select a cluster...',
+                allowClear: true
             });
 
             // Handle selection change
@@ -1940,7 +1988,7 @@
         function populateGridDropdown(index, clusterId) {
             const gridSelect = $('#select-du');
             gridSelect.empty();
-            gridSelect.append(new Option('', '', true, true));
+
             const gridMap = polygons[index].processedData.grids;
 
             gridMap.forEach((grid, gridIndex) => {
@@ -1953,24 +2001,68 @@
             gridSelect.select2({
                 placeholder: 'Select grids...',
                 allowClear: true,
-                width: 'resolve'
+                width: 'resolve',
+                closeOnSelect: false,
+                templateSelection: function (data, container) {
+                            // Get all selected items
+                            const $select = $(data.element).closest('select');
+                            const selectedItems = $select.select2('data');
+
+                            // If there are 3 or fewer selected items, show them all
+                            if (selectedItems.length <= 4) {
+                                return data.text; // Default display for individual items
+                            } else {
+                                // If more than 3 items are selected, show a summary
+                                if (data.id === selectedItems[0].id) {
+                                    // For the first selected item, show the summary
+                                    return `${selectedItems.length} grids selected`;
+                                }
+                                // For other items, hide them by returning an empty string
+                                return '';
+                            }
+                        }
             });
+
+            // Explicitly clear any default selections after initialization
+            gridSelect.val(null).trigger('change.select2');
+            gridSelect.closest('.mb-3').show();
 
             gridSelect.on('change.select2', function (e) {
-                const selectedIndex = parseInt($(this).val());
+                let selectedValues = $(this).val();
                 const polygonData = polygons[index];
-
-                // Find the corresponding grid layer (L.geoJSON layer)
-                polygonData?.gridLayer?.eachLayer((layer) => {
-                    const feature = layer?.options?.feature;
-                    if (feature?.gridIndex === selectedIndex) {
-                        handleGridClick(layer, layer.feature, index, false);
-                    }
-                });
-            });
+                if(multiSelectedGridLayers) {
+                    multiSelectedGridLayers.forEach(layer => {
+                        const color = getColorForNumber(layer.feature.properties.cluster)
+                        setGridColor(layer, color ,1);
+                    })
+                }
+                multiSelectedGridLayers= []
+                if (selectedValues.length === 1) {
+                    const selectedGridIndex = parseInt(selectedValues[0]);
+                    // Find the corresponding grid layer (L.geoJSON layer)
+                    polygonData?.gridLayer?.eachLayer((layer) => {
+                        const feature = layer?.options?.feature;
+                        if (feature?.gridIndex === selectedGridIndex) {
+                            handleGridClick(layer, layer.feature, index, false);
+                        }
+                    });
+                    enableOrDisableHtmlAttribute('reassign-multi-grid', true, 'hidden')
+                } else {
+                    reSizeMap(mapDefaultHeight, true, false);
+                    polygonData?.gridLayer?.eachLayer((layer) => {
+                        const feature = layer?.options?.feature;
+                        if (feature && selectedValues.includes(String(feature.gridIndex))) {
+                            multiSelectedGridLayers.push(layer);
+                            setGridColor(layer, '#FFFF00', 3);
+                        }
+                        selectedGridLayer = null
+                    });
+                    enableOrDisableHtmlAttribute('reassign-multi-grid', false, 'hidden')
+                }
+            })
 
             gridSelect.on('select2:clear', function (e) {
-                reSizeMap(mapDefaultHeight, true)
+                reSizeMap(mapDefaultHeight, true);
             });
         }
 
