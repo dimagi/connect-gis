@@ -959,14 +959,16 @@
             }
         }
 
-        function reSizeMap(mapHeight, hideGrids, clearSelectGrids = true) {
+        function reSizeMap(mapHeight, hideGrids, clearSelectGrids = true, resetAllGridColor = true) {
             const mapElement = $('#map')[0];
             mapElement.style.height = mapHeight;
             mapElement.style.transition = 'height 0.3s ease';
             setTimeout(() => map.invalidateSize(), 50);
             enableOrDisableHtmlAttribute('grid-details', false, 'hidden')
             if(hideGrids) {
-                resetGridColor()
+                if(resetAllGridColor) {
+                    resetGridColor()
+                }
                 if(clearSelectGrids) {
                     clearGridAndClusterSelectIp()
                 }
@@ -1089,8 +1091,10 @@
                 // Reset all grids to their original colors and opacity
                 gridLayer.eachLayer((layer) => {
                     const layerClusterId = parseInt(layer.feature.properties.cluster);
+                    const color = getColorForNumber(layerClusterId);
                     layer.setStyle({
-                        color: getColorForNumber(layerClusterId),
+                        color: color,
+                        fillColor: color,
                         weight: 1,
                         fillOpacity: 0.5,
                         opacity: 1
@@ -1100,12 +1104,28 @@
             selectedGridLayer = null;
         }
 
-        function setGridColor(layer, color, weight) {
+        function setGridColor(layer, color, weight, fillOpacity=0.4) {
             layer.setStyle({
                 color: color,
+                fillColor: color,
                 weight: weight,
-                fillOpacity: 0.4,
+                fillOpacity: fillOpacity,
                 opacity: 1
+            });
+        }
+
+        function highlightCurrentCluster(index, currentCluster) {
+           // Highlight all grids in the same cluster with black and adjust opacity for other clusters
+            const gridLayer = polygons[index].gridLayer;
+            gridLayer.eachLayer((clusterLayer) => {
+                const layerClusterId = parseInt(clusterLayer.feature.properties.cluster);
+                if (layerClusterId === currentCluster ) {
+                    // Highlight current cluster
+                    setGridColor(clusterLayer, '#000000', 2, 0.5)
+                } else {
+                    // Make other clusters lighter
+                    setGridColor(clusterLayer, DISABLE_COLOR, 1, 0.2)
+                }
             });
         }
 
@@ -1126,28 +1146,7 @@
             const currentCluster = parseInt(currentGridData.properties.cluster);
             const currentBuildingCount = currentGridData.properties.buildingCount;
 
-            // Highlight all grids in the same cluster with black and adjust opacity for other clusters
-            const gridLayer = polygons[index].gridLayer;
-            gridLayer.eachLayer((clusterLayer) => {
-                const layerClusterId = parseInt(clusterLayer.feature.properties.cluster);
-                if (layerClusterId === currentCluster && (clusterLayer.feature.properties.gridIndexNum != selectedGridIndex+1)) {
-                    // Highlight current cluster
-                    clusterLayer.setStyle({
-                        color: '#000000', // Black
-                        weight: 2,
-                        fillOpacity: 0.5,
-                        opacity: 1
-                    });
-                } else {
-                    // Make other clusters lighter
-                    clusterLayer.setStyle({
-                        color: DISABLE_COLOR,
-                        weight: 1,
-                        fillOpacity: 0.2, // Reduced opacity for non-selected clusters
-                        opacity: 1
-                    });
-                }
-            });
+            highlightCurrentCluster(index, currentCluster)
 
             // Highlight the clicked grid in yellow
             layer.setStyle({
@@ -2043,12 +2042,13 @@
                 const selectedValue = $(this).val();
                 if (selectedValue) {
                     populateGridDropdown(index, parseInt(selectedValue));
+                    highlightCurrentCluster(index, parseInt(selectedValue));
                 }
             });
 
             // Handle clear event
             clusterSelect.on('select2:clear', function () {
-                reSizeMap(mapDefaultHeight, true);
+                reSizeMap(mapDefaultHeight, true, false, false);
             });
         }
 
@@ -2099,8 +2099,7 @@
                 const polygonData = polygons[index];
                 if(multiSelectedGridLayers) {
                     multiSelectedGridLayers.forEach(layer => {
-                        const color = getColorForNumber(layer.feature.properties.cluster)
-                        setGridColor(layer, color ,1);
+                        setGridColor(layer, '#000000', 2, 0.5)
                     })
                 }
                 multiSelectedGridLayers= []
@@ -2114,8 +2113,8 @@
                         }
                     });
                     enableOrDisableHtmlAttribute('reassign-multi-grid', true, 'hidden')
-                } else {
-                    reSizeMap(mapDefaultHeight, true, false);
+                } else if (selectedValues.length > 1 ){
+                    reSizeMap(mapDefaultHeight, true, false, false);
                     polygonData?.gridLayer?.eachLayer((layer) => {
                         const feature = layer?.options?.feature;
                         if (feature && selectedValues.includes(String(feature.gridIndex))) {
@@ -2125,12 +2124,12 @@
                         selectedGridLayer = null
                     });
                     enableOrDisableHtmlAttribute('reassign-multi-grid', false, 'hidden')
+                } else {
+                    reSizeMap(mapDefaultHeight, true, false)
                 }
             })
 
-            gridSelect.on('select2:clear', function (e) {
-                reSizeMap(mapDefaultHeight, true);
-            });
+
         }
 
         function toggleSidebar() {
