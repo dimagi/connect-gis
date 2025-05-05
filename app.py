@@ -594,92 +594,154 @@ def assign_buildings_to_grids(buildings_geojson, grid_gdf):
 
 def grid_clustering(grid_centroids, building_counts, num_clusters, tolerance=0.1):
     """
-    grid_centroids: np.array of shape (N, 2)
-    building_counts: np.array of building counts per grid
-    num_clusters: desired number of clusters
-    tolerance: allowable +/- tolerance in building counts per cluster
-    """
-    from sklearn.neighbors import NearestNeighbors
+    Cluster grids into num_clusters with building counts in [min_buildings, max_buildings].
+    Splits alternate between vertical (x) and horizontal (- Splits are 1:1 (50%:50%) for even num_clusters, 1:2 (33.33%:66.67%) for odd num_clusters.
 
+    Args:
+        grid_centroids: np.array of shape (N, 2) with [x, y] coordinates
+        building_counts: np.array of building counts per grid
+        num_clusters: desired number of clusters (≥ 1)
+        tolerance: allowable +/- tolerance in building counts per cluster
+
+    Returns:
+        np.array of cluster labels for each grid
+    """
     n_grids = len(grid_centroids)
     if n_grids < num_clusters:
         raise ValueError(f"Cannot create {num_clusters} clusters with only {n_grids} grids")
+    if num_clusters < 1:
+        raise ValueError("Number of clusters must be at least 1")
 
     assigned = np.full(n_grids, fill_value=-1)  # -1 means unassigned
-
     total_buildings = building_counts.sum()
     target_buildings_per_cluster = total_buildings / num_clusters
     min_buildings = target_buildings_per_cluster * (1 - tolerance)
     max_buildings = target_buildings_per_cluster * (1 + tolerance)
 
-    # Build a spatial index
-    nbrs = NearestNeighbors(n_neighbors=n_grids, algorithm='auto').fit(grid_centroids)
-    available_indices = set(range(n_grids))
-
-    def expand_cluster(cluster_id, seed_idx, building_limit, stop_at_limit=False):
+    def recursive_split(indices, num_clusters_to_assign, cluster_id_start, is_vertical=True):
         """
-        Expand a cluster by adding nearby grids until reaching building_limit.
-        If stop_at_limit=True, stop once building_limit is reached or exceeded.
-        If stop_at_limit=False, only add grids if the total stays <= building_limit.
+        Recursively split the given grid indices into num_clusters_to_assign clusters.
+
+        Args:
+            indices: np.array of grid indices to cluster
+            num_clusters_to_assign: number of clusters to create in this region
+            cluster_id_start: starting cluster ID for assignments
+            is_vertical: True for vertical split (x), False for horizontal (y)
+
+        Returns:
+            next available cluster ID
         """
-        current_buildings = building_counts[np.where(assigned == cluster_id)].sum()
-        if current_buildings >= building_limit:
-            return current_buildings
+        if num_clusters_to_assign == 0:
+            return cluster_id_start
+        if num_clusters_to_assign == 1:
+            # Base case: assign all grids to one cluster
+            region_buildings = building_counts[indices].sum()
+            if region_buildings < min_buildings or region_buildings > max_buildings:
+                print(
+                    f"Warning: Cluster {cluster_id_start} has {region_buildings} buildings, outside [{min_buildings}, {max_buildings}]")
+            assigned[indices] = cluster_id_start
+            return cluster_id_start + 1
 
-        distances, neighbors = nbrs.kneighbors([grid_centroids[seed_idx]], n_neighbors=n_grids)
-        for neighbor_idx in neighbors[0]:
-            if neighbor_idx in available_indices:
-                next_buildings = current_buildings + building_counts[neighbor_idx]
-                if stop_at_limit:
-                    # Add grid if under limit or to reach/exceed limit
-                    if next_buildings <= building_limit or current_buildings < building_limit:
-                        assigned[neighbor_idx] = cluster_id
-                        available_indices.remove(neighbor_idx)
-                        current_buildings = next_buildings
-                    if current_buildings >= building_limit:
-                        break
-                else:
-                    # Only add if total stays <= limit
-                    if next_buildings <= building_limit:
-                        assigned[neighbor_idx] = cluster_id
-                        available_indices.remove(neighbor_idx)
-                        current_buildings = next_buildings
-                    else:
-                        break
-        return current_buildings
+        # Determine split ratio
+        if num_clusters_to_assign % 2 == 0:
+            split_ratio = 0.5
+            left_clusters = num_clusters_to_assign // 2
+            right_clusters = num_clusters_to_assign - left_clusters
+        else:
+            left_clusters = math.ceil(num_clusters_to_assign / 2)
+            right_clusters = num_clusters_to_assign - left_clusters
+            split_ratio = left_clusters / num_clusters_to_assign
 
-    # First Iteration: Initialize each cluster to min_buildings
-    cluster_id = 0
-    while available_indices and cluster_id < num_clusters:
-        # Pick the grid with the highest building count as the seed
-        seed_idx = max(available_indices, key=lambda idx: building_counts[idx])
-        assigned[seed_idx] = cluster_id
-        available_indices.remove(seed_idx)
+        # Sort by x (vertical) or y (horizontal)
+        coord_idx = 0 if is_vertical else 1
+        sorted_indices = indices[np.argsort(grid_centroids[indices, coord_idx])]
+        sorted_counts = building_counts[sorted_indices]
+        cumulative_counts = np.cumsum(sorted_counts)
+        total = cumulative_counts[-1] if len(cumulative_counts) > 0 else 0
 
-        # Expand to min_buildings
-        expand_cluster(cluster_id, seed_idx, min_buildings, stop_at_limit=True)
-        cluster_id += 1
+        # Adjust split point to respect min/max constraints
+        target = split_ratio * total
+        split_idx = np.argmin(np.abs(cumulative_counts - target))
+        left_count = cumulative_counts[split_idx] if split_idx < len(cumulative_counts) else 0
+        right_count = total - left_count
 
-    # Second Iteration: Expand clusters to target_buildings_per_cluster
-    for cluster_id in range(num_clusters):
-        seed_idx = np.where(assigned == cluster_id)[0][0]
-        expand_cluster(cluster_id, seed_idx, target_buildings_per_cluster, stop_at_limit=True)
+        # Check if split is feasible
+        left_min = min_buildings * left_clusters
+        right_min = min_buildings * right_clusters
+        left_max = max_buildings * left_clusters
+        right_max = max_buildings * right_clusters
 
-    # Third Iteration: Expand clusters to max_buildings
-    for cluster_id in range(num_clusters):
-        seed_idx = np.where(assigned == cluster_id)[0][0]
-        expand_cluster(cluster_id, seed_idx, max_buildings, stop_at_limit=False)
+        if left_count < left_min or right_count < right_min:
+            # Try to adjust split point to meet minimum
+            for i in range(len(cumulative_counts)):
+                lc = cumulative_counts[i]
+                rc = total - lc
+                if lc >= left_min and rc >= right_min and lc <= left_max and rc <= right_max:
+                    split_idx = i
+                    left_count = lc
+                    right_count = rc
+                    break
+            else:
+                print(
+                    f"Warning: Cannot split {len(indices)} grids into {left_clusters}+{right_clusters} clusters within constraints")
 
-    # Assign any remaining grids to the nearest cluster
-    for idx in list(available_indices):
-        distances, neighbors = nbrs.kneighbors([grid_centroids[idx]], n_neighbors=n_grids)
-        for neighbor_idx in neighbors[0]:
-            neighbor_cluster = assigned[neighbor_idx]
-            if neighbor_cluster != -1:
-                assigned[idx] = neighbor_cluster
-                available_indices.remove(idx)
-                break
+        # Split indices
+        left_indices = sorted_indices[:split_idx + 1]
+        right_indices = sorted_indices[split_idx + 1:]
 
+        # Recursively split left and right regions, alternating direction
+        next_id = recursive_split(left_indices, left_clusters, cluster_id_start, not is_vertical)
+        next_id = recursive_split(right_indices, right_clusters, next_id, not is_vertical)
+
+        return next_id
+
+    def post_process_assignments():
+        """Adjust cluster assignments to meet min/max constraints."""
+        for cluster_id in range(num_clusters):
+            cluster_indices = np.where(assigned == cluster_id)[0]
+            cluster_count = building_counts[cluster_indices].sum()
+            if cluster_count < min_buildings:
+                # Find grids from other clusters to add
+                other_clusters = [i for i in range(num_clusters) if i != cluster_id]
+                for other_id in other_clusters:
+                    other_indices = np.where(assigned == other_id)[0]
+                    other_count = building_counts[other_indices].sum()
+                    if other_count > min_buildings:
+                        # Sort by distance to cluster centroid
+                        cluster_centroid = grid_centroids[cluster_indices].mean(axis=0)
+                        distances = np.linalg.norm(grid_centroids[other_indices] - cluster_centroid, axis=1)
+                        sorted_other = other_indices[np.argsort(distances)]
+                        for idx in sorted_other:
+                            if cluster_count < min_buildings and other_count > min_buildings:
+                                assigned[idx] = cluster_id
+                                cluster_count += building_counts[idx]
+                                other_count -= building_counts[idx]
+                            else:
+                                break
+            elif cluster_count > max_buildings:
+                # Move grids to other clusters
+                other_clusters = [i for i in range(num_clusters) if i != cluster_id]
+                for other_id in other_clusters:
+                    other_indices = np.where(assigned == other_id)[0]
+                    other_count = building_counts[other_indices].sum()
+                    if other_count < max_buildings:
+                        cluster_centroid = grid_centroids[other_indices].mean(axis=0) if len(other_indices) > 0 else \
+                        grid_centroids[cluster_indices].mean(axis=0)
+                        distances = np.linalg.norm(grid_centroids[cluster_indices] - cluster_centroid, axis=1)
+                        sorted_cluster = cluster_indices[np.argsort(distances)]
+                        for idx in sorted_cluster:
+                            if cluster_count > max_buildings and other_count + building_counts[idx] <= max_buildings:
+                                assigned[idx] = other_id
+                                cluster_count -= building_counts[idx]
+                                other_count += building_counts[idx]
+                            else:
+                                break
+
+    # Start recursive splitting with all grids
+    recursive_split(np.arange(n_grids), num_clusters, 0, is_vertical=False)
+
+    # Post-process to enforce constraints
+    post_process_assignments()
     return assigned
 
 @app.route('/get_building_density_v2', methods=['POST'])
