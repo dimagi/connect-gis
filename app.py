@@ -549,7 +549,7 @@ def generate_grid(polygon_coords, grid_size_meters=50):
             if polygon.intersects(grid_poly):
                 intersection = polygon.intersection(grid_poly)
                 if not intersection.is_empty and intersection.is_valid:
-                    grids.append(intersection)
+                    grids.append(grid_poly)
 
     # Check if any grids were created
     if not grids:
