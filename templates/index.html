@@ -207,21 +207,44 @@
                 </ul>
                 <div class="tab-content" id="myTabContent">
                     <div class="tab-pane fade show active" id="polygon-clustering" role="tabpanel" aria-labelledby="polygon-clustering-tab">
-                        <!-- CSV Operations -->
+                        <!-- Area Selection -->
                         <div class="card">
                             <div class="card-body">
-                                <h5 class="card-title">CSV Operations</h5>
-                                <div class="row g-2">
-                                    <div class="col-6">
-                                        <input type="text" id="csvDownload" class="d-none" onclick="downloadSampleCsv()">
-                                        <label for="csvDownload" class="btn btn-secondary w-100">Download Sample CSV</label>
+                                <h5 class="card-title">Area Selection</h5>
+                                <div class="mb-3">
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="radio" name="areaSelectionType" id="csvSelection" value="csv" checked>
+                                        <label class="form-check-label" for="csvSelection">CSV Upload</label>
                                     </div>
-                                    <div class="col-6">
-                                        <input type="file" id="csvUpload" accept=".csv" class="d-none" onchange="uploadCSVPolygon()">
-                                        <label for="csvUpload" class="btn btn-success w-100">Upload CSV</label>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="radio" name="areaSelectionType" id="wardSelection" value="ward">
+                                        <label class="form-check-label" for="wardSelection">Ward Selection</label>
                                     </div>
                                 </div>
-                                <span id="uploaded-file-name" class="d-block text-muted mt-2">No File Chosen</span>
+
+                                <!-- CSV Upload Section -->
+                                <div id="csvUploadSection">
+                                    <div class="row g-2">
+                                        <div class="col-6">
+                                            <input type="text" id="csvDownload" class="d-none" onclick="downloadSampleCsv()">
+                                            <label for="csvDownload" class="btn btn-secondary w-100">Download Sample CSV</label>
+                                        </div>
+                                        <div class="col-6">
+                                            <input type="file" id="csvUpload" accept=".csv" class="d-none" onchange="uploadCSVPolygon()">
+                                            <label for="csvUpload" class="btn btn-success w-100">Upload CSV</label>
+                                        </div>
+                                    </div>
+                                    <span id="uploaded-file-name" class="d-block text-muted mt-2">No File Chosen</span>
+                                </div>
+
+                                <!-- Ward Selection Section -->
+                                <div id="wardSelectionSection" style="display: none;">
+                                    <div class="mb-3">
+                                        <label for="wardSelect" class="form-label">Select Wards:</label>
+                                        <select id="wardSelect" class="form-select select2" multiple="multiple" style="width: 100%">
+                                        </select>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -418,14 +441,129 @@
         let wardsLayer = null, healthFacilitiesLayer = null;
         let loadedWardsBounds = null, loadedHealthBounds = null;
         let clusterBuildingCounts = new Map();
+        let selectedWards = new Set(); // Track selected wards
+        let wardsData = null; // Store the complete wards data
+
         Promise.all([
             fetch('/static/nigeria_ward.geojson').then(r => r.json()),
             fetch('/static/nigeria_health_facilities.geojson').then(r => r.json())
-        ]).then(([wardsData, facilitiesData]) => {
+        ]).then(([wardsDataResponse, facilitiesData]) => {
+            wardsData = wardsDataResponse; // Store the complete wards data
             setupIndex(wardsData, wardsIndex, 'polygon');
             setupIndex(facilitiesData, facilitiesIndex, 'point');
             updateMapLayers();
+            populateWardDropdown(wardsData);
         });
+
+        // Function to populate ward dropdown
+        function populateWardDropdown(wardsData) {
+            const wardSelect = $('#wardSelect');
+            wardSelect.empty();
+
+            // Sort wards by name
+            const sortedWards = wardsData.features.sort((a, b) => 
+                a.properties.ward_name.localeCompare(b.properties.ward_name)
+            );
+
+            // Add wards to dropdown
+            sortedWards.forEach(ward => {
+                wardSelect.append(new Option(ward.properties.ward_name, ward.properties.ward_name));
+            });
+
+            // Initialize Select2
+            wardSelect.select2({
+                placeholder: 'Select wards...',
+                allowClear: true,
+                width: 'resolve',
+                closeOnSelect: false
+            });
+
+            // Handle ward selection changes
+            wardSelect.on('change', function() {
+                const selectedValues = $(this).val() || [];
+                selectedWards = new Set(selectedValues);
+                handleWardSelection(selectedValues);
+            });
+        }
+
+        // Function to handle ward selection
+        function handleWardSelection(selectedWardNames) {
+            if (!selectedWardNames || selectedWardNames.length === 0) {
+                return;
+            }
+
+            // Get the ward features for selected wards
+            const selectedFeatures = wardsData.features.filter(feature => 
+                selectedWardNames.includes(feature.properties.ward_name)
+            );
+
+            if (selectedFeatures.length === 0) return;
+
+            // Clear existing polygons
+            clearOA();
+
+            // Create a mock layer for each selected ward
+            selectedFeatures.forEach(wardFeature => {
+                try {
+                    let latLngs;
+                    
+                    // Handle both Polygon and MultiPolygon types
+                    if (wardFeature.geometry.type === 'MultiPolygon') {
+                        // For MultiPolygon, take the first polygon's coordinates
+                        latLngs = wardFeature.geometry.coordinates[0].map(ring => 
+                            ring.map(coord => ({
+                                lat: coord[1],
+                                lng: coord[0]
+                            }))
+                        );
+                    } else if (wardFeature.geometry.type === 'Polygon') {
+                        // For Polygon, use coordinates directly
+                        latLngs = wardFeature.geometry.coordinates.map(ring => 
+                            ring.map(coord => ({
+                                lat: coord[1],
+                                lng: coord[0]
+                            }))
+                        );
+                    } else {
+                        throw new Error(`Unsupported geometry type: ${wardFeature.geometry.type}`);
+                    }
+
+                    // Validate the polygon has at least one ring with at least 3 points
+                    if (latLngs.length === 0 || latLngs[0].length < 3) {
+                        throw new Error(`Invalid polygon: insufficient points in ward ${wardFeature.properties.ward_name}`);
+                    }
+
+                    const mockLayer = {
+                        getLatLngs: () => latLngs,
+                        getBounds: () => {
+                            // Create bounds from all points in all rings
+                            const allPoints = latLngs.flat();
+                            return L.latLngBounds(allPoints);
+                        }
+                    };
+
+                    // Add the ward as a polygon
+                    addOrUpdatePolygon(mockLayer);
+                } catch (error) {
+                    console.error(`Error processing ward ${wardFeature.properties.ward_name}:`, error);
+                    console.log('Ward geometry:', JSON.stringify(wardFeature.geometry));
+                }
+            });
+
+            // Update ward highlighting
+            if (wardsLayer) {
+                wardsLayer.eachLayer(layer => {
+                    const wardName = layer.feature.properties.ward_name;
+                    if (selectedWards.has(wardName)) {
+                        layer.setStyle({
+                            fillColor: 'blue',
+                            weight: 2,
+                            fillOpacity: 0.2
+                        });
+                    }
+                });
+            }
+        }
 
         const updateMapLayers = debounce(() => {
             updateWards();
@@ -2001,6 +2139,73 @@
         $(document).ready(function () {
             toggleInputFields();
             $('#sidebar-toggle-btn').on('click', toggleSidebar);
+
+            // Initialize radio button state
+            $('input[name="areaSelectionType"]').change(function() {
+                const selectedValue = $(this).val();
+                if (selectedValue === 'csv') {
+                    $('#csvUploadSection').show();
+                    $('#wardSelectionSection').hide();
+                    // Clear ward selection
+                    $('#wardSelect').val(null).trigger('change');
+                    // Clear any ward highlighting
+                    if (wardsLayer) {
+                        wardsLayer.eachLayer(layer => {
+                            layer.setStyle({
+                                color: "black",
+                                weight: 1,
+                                fillOpacity: 0,
+                                dashArray: "4,4"
+                            });
+                        });
+                    }
+                } else {
+                    $('#csvUploadSection').hide();
+                    $('#wardSelectionSection').show();
+                    // Clear CSV selection
+                    $('#csvUpload').val('');
+                    $('#uploaded-file-name').text('No File Chosen');
+                    // Clear any existing polygons
+                    clearOA();
+                }
+            });
+
+            // Trigger initial state
+            $('#csvSelection').trigger('change');
+
+            // Function to activate tab based on URL parameter
+            function activateTabFromURL() {
+                const urlParams = new URLSearchParams(window.location.search);
+                const tabParam = urlParams.get('tab');
+
+                if (tabParam) {
+                    let tabId = '';
+                    switch (tabParam.toLowerCase()) {
+                        case 'polygon-clustering':
+                            tabId = '#polygon-clustering-tab';
+                            break;
+                        case 'reports':
+                            tabId = '#reports-tab';
+                            break;
+                        default:
+                            tabId = '#polygon-clustering-tab'; // Default tab
+                    }
+
+                    // Activate the tab
+                    const tab = new bootstrap.Tab(document.querySelector(tabId));
+                    tab.show();
+
+                    // Update the URL without reloading (optional)
+                    window.history.replaceState(null, '', `?tab=${tabParam}`);
+                } else {
+                    const defaultTab = new bootstrap.Tab(document.querySelector('#polygon-clustering-tab'));
+                    defaultTab.show();
+                }
+            }
+
+            activateTabFromURL();
+
+            window.addEventListener('popstate', activateTabFromURL);
         });
 
         function populateClusterDropdown(index) {
@@ -2232,45 +2437,6 @@
             downloadMenu.style.display = 'none';
             downloadBtn.setAttribute('aria-expanded', 'false');
             downloadCsvForCommCare();
-        });
-
-        $(document).ready(function () {
-            toggleInputFields();
-            $('#sidebar-toggle-btn').on('click', toggleSidebar);
-
-            // Function to activate tab based on URL parameter
-            function activateTabFromURL() {
-                const urlParams = new URLSearchParams(window.location.search);
-                const tabParam = urlParams.get('tab');
-
-                if (tabParam) {
-                    let tabId = '';
-                    switch (tabParam.toLowerCase()) {
-                        case 'polygon-clustering':
-                            tabId = '#polygon-clustering-tab';
-                            break;
-                        case 'reports':
-                            tabId = '#reports-tab';
-                            break;
-                        default:
-                            tabId = '#polygon-clustering-tab'; // Default tab
-                    }
-
-                    // Activate the tab
-                    const tab = new bootstrap.Tab(document.querySelector(tabId));
-                    tab.show();
-
-                    // Update the URL without reloading (optional)
-                    window.history.replaceState(null, '', `?tab=${tabParam}`);
-                } else {
-                    const defaultTab = new bootstrap.Tab(document.querySelector('#polygon-clustering-tab'));
-                    defaultTab.show();
-                }
-            }
-
-            activateTabFromURL();
-
-            window.addEventListener('popstate', activateTabFromURL);
         });
 
     </script>
