@@ -315,6 +315,10 @@
                                     <label for="gridLength" class="form-label">Delivery Unit Length in metres:</label>
                                     <input type="number" class="form-control" id="gridLength" step="0.01" value="50">
                                 </div>
+                                <div id="noOfFLWsIP" class="mb-3">
+                                    <label for="noOfFLWs" class="form-label">Number of Field Workers:</label>
+                                    <input type="number" class="form-control" id="noOfFLWs" value="25">
+                                </div>
                             </div>
                         </div>
 
@@ -1807,6 +1811,57 @@
             showToast("CSV downloaded! Import into Google My Maps at mymaps.google.com.", "success", 3000, "#00FF00");
         }
 
+        function createFLWAssignments(processedData) {
+            // Step 1: Create array of service areas with their centroids
+            const serviceAreas = [];
+            processedData.clusters.forEach((cluster, clusterId) => {
+                if (cluster.boundaryWKT && cluster.boundaryWKT !== "N/A") {
+                    // Extract coordinates from WKT
+                    const coordsMatch = cluster.boundaryWKT.match(/POLYGON \(\((.*?)\)\)/);
+                    if (coordsMatch) {
+                        const coords = coordsMatch[1].split(', ').map(coord => {
+                            const [x, y] = coord.split(' ').map(Number);
+                            return [x, y];
+                        });
+                        
+                        // Calculate centroid
+                        const centroid = coords.reduce((acc, [x, y]) => {
+                            acc[0] += x;
+                            acc[1] += y;
+                            return acc;
+                        }, [0, 0]).map(sum => sum / coords.length);
+
+                        serviceAreas.push({
+                            clusterId: parseInt(clusterId),
+                            centroid: centroid,
+                            buildingCount: cluster.buildingCount,
+                            boundaryWKT: cluster.boundaryWKT
+                        });
+                    }
+                }
+            });
+
+            // Step 2: Sort service areas by coordinates
+            serviceAreas.sort((a, b) => {
+                if (a.centroid[0] !== b.centroid[0]) {
+                    return a.centroid[0] - b.centroid[0];
+                }
+                return a.centroid[1] - b.centroid[1];
+            });
+
+            // Step 3: Assign FLWs
+            const numFLWs = parseInt($('#noOfFLWs').val()) || 25; // Get value from input, default to 25 if not set
+            const saPerFLW = Math.ceil(serviceAreas.length / numFLWs);
+            const flwAssignments = new Map();
+            
+            serviceAreas.forEach((sa, index) => {
+                const flwIndex = Math.floor(index / saPerFLW);
+                flwAssignments.set(sa.clusterId, `FLW${flwIndex + 1}`);
+            });
+
+            return flwAssignments;
+        }
+
         function downloadCsvForCommCare() {
             const polygonData = polygons[selectedPolygonIndex];
             if (!polygonData || !polygonData.processedData) {
@@ -1815,6 +1870,11 @@
             }
             const processedData = polygonData.processedData;
             let csvContent = "name,delivery_target,delivery_count,radius,centroid,bounding_box,service_area,flw,WKT,distance between adj sides 1,distance between adj sides 2,#Buildings,Surface Area (sq. meters), OA\n";
+
+            // Get FLW assignments
+            const flwAssignments = createFLWAssignments(processedData);
+
+            // Generate CSV content
             processedData.grids.forEach((grid, index) => {
                 if (grid.buildingCount === 0) return;
                 const geometry = grid.geoJSON.geometry;
@@ -1830,7 +1890,8 @@
                 const surfaceArea = turf.area(grid.geoJSON);
                 const gridName = `Delivery Unit ${index + 1}`;
                 const deliveryTarget = 1, deliveryCount = 0;
-                csvContent += `"${gridName}",${deliveryTarget},${deliveryCount},${radius},"${centroidStr}",${boundingBox},${parseInt(grid.clusterId) + 1},"","${grid.gridWKT}",${widthMeters},${heightMeters},${grid.buildingCount},${surfaceArea},${selectedPolygonIndex + 1}\n`;
+                const flw = flwAssignments.get(parseInt(grid.clusterId)) || "";
+                csvContent += `"${gridName}",${deliveryTarget},${deliveryCount},${radius},"${centroidStr}",${boundingBox},${parseInt(grid.clusterId) + 1},"${flw}","${grid.gridWKT}",${widthMeters},${heightMeters},${grid.buildingCount},${surfaceArea},${selectedPolygonIndex + 1}\n`;
             });
             downloadCsv(csvContent, 'csv_for_CommCare.csv');
             showToast("CommCare CSV downloaded!", "success", 3000, "#00FF00");
