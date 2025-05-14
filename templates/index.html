@@ -28,6 +28,7 @@
     <script src="https://code.jquery.com/jquery-3.6.0.min.js" integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4=" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.8/dist/umd/popper.min.js" integrity="sha384-I7E8VVD/ismYTF4hNIPjVp/Zjvgyol6VFvRkX/vR+Vc4jQkC+hVqc2pM8ODewa9r" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.min.js" integrity="sha384-0pUGZvbkm6XF6gxjEnlmuGrJXVbNuzT9qBBavbLwCsOGabYfZo0T0to5eqruptLy" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
     <style>
         body {
@@ -131,36 +132,6 @@
         }
         .card-text {
             margin-bottom: 2px !important 
-        }
-        .download-container {
-            position: relative;
-        }
-
-        .download-menu {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            background: #fff;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
-            z-index: 1000;
-            width: 100%;
-        }
-
-        .download-option {
-            display: block;
-            width: 100%;
-            padding: 10px;
-            border: none;
-            background: #fff;
-            text-align: left;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        .download-option:hover {
-            background: #f0f0f0;
         }
 
     </style>
@@ -343,14 +314,7 @@
                                         <button class="btn btn-danger w-100" onclick="clearOA()" id="clear-oa" disabled>Clear Map</button>
                                     </div>
                                     <div class="col-6">
-                                        <div class="download-container">
-                                            <button class="btn btn-primary w-100" id="download-btn" disabled>Download <span>▼</span></button>
-                                            <div id="download-menu" class="download-menu" style="display: none;">
-                                                <button id="download-oa-wkt" class="download-option">Download OA WKT</button>
-                                                <button id="download-csv-my-maps" class="download-option">Download CSV for My Maps</button>
-                                                <button id="download-csv-commcare" class="download-option">Download CSV for CommCare</button>
-                                            </div>
-                                        </div>
+                                            <button class="btn btn-primary w-100" id="download-btn" disabled>Download CSVs</button>
                                     </div>
                                 </div>
                             </div>
@@ -641,12 +605,6 @@
                 // Simplified enabling/disabling logic for download options
                 const polygonExists = true; // A polygon is selected
                 const gridsExist = selectedPolygon.gridsDataExists;
-
-                // Enable "Download OA WKT" if a polygon exists
-                enableOrDisableHtmlAttribute("download-oa-wkt", !polygonExists);
-                // Enable CSV downloads only if grids are drawn
-                enableOrDisableHtmlAttribute("download-csv-my-maps", !gridsExist);
-                enableOrDisableHtmlAttribute("download-csv-commcare", !gridsExist);
                 // Enable the "Download" button if any option is available (i.e., if a polygon exists)
                 enableOrDisableHtmlAttribute("download-btn", !polygonExists);
             } else {
@@ -658,15 +616,10 @@
                 enableOrDisableHtmlAttribute("get-grids", true);
                 enableOrDisableHtmlAttribute("clear-clusters", true);
                 enableOrDisableHtmlAttribute("clear-grids", true);
-
-                // Disable all download options and the "Download" button
-                enableOrDisableHtmlAttribute("download-oa-wkt", true);
-                enableOrDisableHtmlAttribute("download-csv-my-maps", true);
-                enableOrDisableHtmlAttribute("download-csv-commcare", true);
                 enableOrDisableHtmlAttribute("download-btn", true);
             }
-            highlightSelectedPolygon();
             reSizeMap(mapDefaultHeight, true)
+            highlightSelectedPolygon();
         }
 
         function highlightSelectedPolygon() {
@@ -845,9 +798,6 @@
             enableOrDisableHtmlAttribute("run-clustering", true);
             enableOrDisableHtmlAttribute("get-grids", true);
             enableOrDisableHtmlAttribute("clear-oa", true);
-            enableOrDisableHtmlAttribute("download-oa-wkt", true);
-            enableOrDisableHtmlAttribute("download-csv-my-maps", true);
-            enableOrDisableHtmlAttribute("download-csv-commcare", true);
             enableOrDisableHtmlAttribute("download-btn", true);
             $('#uploaded-file-name').text('No File Chosen');
             updatePolygonDropdown();
@@ -879,9 +829,6 @@
             polygonData.densityLayer.clearLayers();
             polygonData.gridsDataExists = false;
             enableOrDisableHtmlAttribute("clear-grids", true);
-            enableOrDisableHtmlAttribute("download-csv-my-maps", true);
-            enableOrDisableHtmlAttribute("download-csv-commcare", true);
-            enableOrDisableHtmlAttribute("download-oa-wkt", false);
             enableOrDisableHtmlAttribute("download-btn", false);
             enableOrDisableHtmlAttribute('grid-details', false, 'hidden')
             polygonData.processedData = { clusters: new Map(), grids: new Map(), buildings: new Map() };
@@ -1774,41 +1721,64 @@
             });
         }
 
-        function downloadGmapData() {
+        function getGmapData() {
             const polygonData = polygons[selectedPolygonIndex];
+            const processedData = polygonData?.processedData;
             if (!polygonData || !polygonData.processedData) {
                 console.error("No processed data available for download at index:", index, polygonData);
                 return;
             }
-            const processedData = polygonData.processedData;
             if (!processedData.clusters.size && !processedData.grids.size && !processedData.buildings.size) {
                 console.error("No processed data available for download");
                 return;
             }
-            let clusterCsvContent = "WKT,name,description,SA,OA\n";
+            // Prepare service areas and delivery units data
+            const saDuData = [];
             processedData.clusters.forEach((cluster, clusterId) => {
-                clusterCsvContent += `"${cluster.boundaryWKT}",SA ${parseInt(cluster.clusterId) + 1},${cluster.buildingCount},-,${selectedPolygonIndex + 1}\n`;
+                saDuData.push({
+                    WKT: cluster.boundaryWKT,
+                    Name: `SA ${parseInt(cluster.clusterId) + 1}`,
+                    Description: cluster.buildingCount,
+                    SA: '-',
+                    OA: selectedPolygonIndex + 1
+                });
             });
+
             processedData.grids.forEach((grid, index) => {
                 if (grid.buildingCount > 0) {
-                    clusterCsvContent += `"${grid.gridWKT}",DU ${index + 1},${grid.buildingCount},${parseInt(grid.clusterId) + 1},${selectedPolygonIndex + 1}\n`;
+                    saDuData.push({
+                        WKT: grid.gridWKT,
+                        Name: `DU ${index + 1}`,
+                        Description: grid.buildingCount,
+                        SA: parseInt(grid.clusterId) + 1,
+                        OA: selectedPolygonIndex + 1
+                    });
                 }
             });
-            let buildingsCsvContent = "Name,OA,SA,DU,latitude,longitude,area_in_meters,confidence,geometry,full_plus_code\n";
+
+            // Prepare buildings data
+            const buildingsData = [];
             processedData.buildings.forEach((building, index) => {
                 const featureProps = building.feature.properties || {};
                 const gridIndex = building.gridIndex !== undefined ? building.gridIndex + 1 : "N/A";
-                const latitude = building.coordinates[1];
-                const longitude = building.coordinates[0];
-                const areaInMeters = featureProps.area_in_meters || "N/A";
-                const confidence = featureProps.confidence || "N/A";
-                const fullPlusCode = featureProps.full_plus_code || "N/A";
-                buildingsCsvContent += `Building ${index + 1},${selectedPolygonIndex + 1},${parseInt(building.clusterId) + 1},${gridIndex},${latitude},${longitude},${areaInMeters},${confidence},"${building.wkt}",${fullPlusCode}\n`;
+                buildingsData.push({
+                    Name: `Building ${index + 1}`,
+                    OA: selectedPolygonIndex + 1,
+                    SA: parseInt(building.clusterId) + 1,
+                    DU: gridIndex,
+                    Latitude: building.coordinates[1],
+                    Longitude: building.coordinates[0],
+                    Area_In_Meters: featureProps.area_in_meters || "N/A",
+                    Confidence: featureProps.confidence || "N/A",
+                    Geometry: building.wkt,
+                    Full_Plus_Code: featureProps.full_plus_code || "N/A"
+                });
             });
-            downloadCsv(clusterCsvContent, 'service_area_&_delivery_units.csv');
-            downloadCsv(buildingsCsvContent, 'buildings.csv');
-            downloadOAWkt();
-            showToast("CSV downloaded! Import into Google My Maps at mymaps.google.com.", "success", 3000, "#00FF00");
+
+            return {
+                serviceAreasDeliveryUnits: saDuData,
+                buildings: buildingsData
+            };
         }
 
         function createFLWAssignments(processedData) {
@@ -1862,21 +1832,23 @@
             return flwAssignments;
         }
 
-        function downloadCsvForCommCare() {
+        function getCommCareData() {
             const polygonData = polygons[selectedPolygonIndex];
+            const processedData = polygonData?.processedData;
             if (!polygonData || !polygonData.processedData) {
                 console.error("No processed data available for download at index:", index, polygonData);
                 return;
             }
-            const processedData = polygonData.processedData;
-            let csvContent = "name,delivery_target,delivery_count,radius,centroid,bounding_box,service_area,flw,WKT,distance between adj sides 1,distance between adj sides 2,#Buildings,Surface Area (sq. meters), OA\n";
-
-            // Get FLW assignments
+            if (!processedData.clusters.size && !processedData.grids.size && !processedData.buildings.size) {
+                console.error("No processed data available for download");
+                return;
+            }
             const flwAssignments = createFLWAssignments(processedData);
 
-            // Generate CSV content
+            const commCareData = [];
             processedData.grids.forEach((grid, index) => {
                 if (grid.buildingCount === 0) return;
+
                 const geometry = grid.geoJSON.geometry;
                 const bbox = turf.bbox(grid.geoJSON);
                 const widthDeg = bbox[2] - bbox[0];
@@ -1888,13 +1860,26 @@
                 const centroidStr = `${centroid[1]} ${centroid[0]}`;
                 const boundingBox = geometry.coordinates[0].map(coord => `${coord[1]} ${coord[0]}`).join(' ');
                 const surfaceArea = turf.area(grid.geoJSON);
-                const gridName = `Delivery Unit ${index + 1}`;
-                const deliveryTarget = 1, deliveryCount = 0;
-                const flw = flwAssignments.get(parseInt(grid.clusterId)) || "";
-                csvContent += `"${gridName}",${deliveryTarget},${deliveryCount},${radius},"${centroidStr}",${boundingBox},${parseInt(grid.clusterId) + 1},"${flw}","${grid.gridWKT}",${widthMeters},${heightMeters},${grid.buildingCount},${surfaceArea},${selectedPolygonIndex + 1}\n`;
+
+                commCareData.push({
+                    Name: `Delivery Unit ${index + 1}`,
+                    Delivery_Target: 1,
+                    Delivery_Count: 0,
+                    Radius: radius,
+                    Centroid: centroidStr,
+                    Bounding_Box: boundingBox,
+                    Service_Area: parseInt(grid.clusterId) + 1,
+                    FLW: flwAssignments.get(parseInt(grid.clusterId)) || "",
+                    WKT: grid.gridWKT,
+                    Distance_Between_Adj_Sides_1: widthMeters,
+                    Distance_Between_Adj_Sides_2: heightMeters,
+                    Buildings_Count: grid.buildingCount,
+                    Surface_Area_sq_meters: surfaceArea,
+                    OA: selectedPolygonIndex + 1
+                });
             });
-            downloadCsv(csvContent, 'csv_for_CommCare.csv');
-            showToast("CommCare CSV downloaded!", "success", 3000, "#00FF00");
+
+            return commCareData;
         }
 
         function downloadSampleCsv() {
@@ -2149,7 +2134,6 @@
                         enableOrDisableHtmlAttribute("clear-clusters", false);
                     }
                     enableOrDisableHtmlAttribute("clear-oa", false);
-                    enableOrDisableHtmlAttribute("download-oa-wkt", false);
                     enableOrDisableHtmlAttribute("download-btn", false);
                     enableOrDisableHtmlAttribute("run-clustering", false);
                     return response.json();
@@ -2183,18 +2167,15 @@
                     $('#building-count').text("Error fetching data");
                     enableOrDisableHtmlAttribute("clear-clusters", false);
                     enableOrDisableHtmlAttribute("clear-oa", false);
-                    enableOrDisableHtmlAttribute("download-oa-wkt", false);
                     enableOrDisableHtmlAttribute("download-btn", false);
                 });
         }
 
-        function downloadOAWkt() {
+        function getOAWktData() {
             const polygonData = polygons[selectedPolygonIndex];
             const coordsStr = polygonData.latlngs.map(coord => `${coord[0]} ${coord[1]}`).join(', ');
             const wkt = `POLYGON ((${coordsStr}))`;
-            const csvContent = `OA Wkt\n"${wkt}"`;
-            downloadCsv(csvContent, `oa_${selectedPolygonIndex + 1}_wkt.csv`);
-            showToast("OA WKT downloaded!", "success", 2000, "#4CAF50");
+            return [{ 'OA Wkt': wkt }];
         }
 
         $(document).ready(function () {
@@ -2460,45 +2441,61 @@
                 showToast("Please select a polygon.", "warning", 3000, "#FFA500");
             }
         });
-
-        // Dropdown menu for Download button
-        const downloadBtn = document.getElementById('download-btn');
-        const downloadMenu = document.getElementById('download-menu');
-
+        const downloadBtn = document.getElementById('download-btn')
         // Toggle dropdown menu on click
         downloadBtn.addEventListener('click', () => {
             if (!downloadBtn.disabled) {
-                downloadMenu.style.display = downloadMenu.style.display === 'block' ? 'none' : 'block';
-                downloadBtn.setAttribute('aria-expanded', downloadMenu.style.display === 'block' ? 'true' : 'false');
+                try {
+                    // Get all data
+                    const oaWktData = getOAWktData();
+                    const gmapData = getGmapData();
+                    const commCareData = getCommCareData();
+
+                    // Create workbook with multiple sheets
+                    const wb = XLSX.utils.book_new();
+
+                    // Add OA WKT sheet
+                    XLSX.utils.book_append_sheet(
+                        wb,
+                        XLSX.utils.json_to_sheet(oaWktData),
+                        'OA_WKT'
+                    );
+
+                    if(gmapData)  {
+                        // Add Service Areas & Delivery Units sheet
+                        XLSX.utils.book_append_sheet(
+                            wb,
+                            XLSX.utils.json_to_sheet(gmapData.serviceAreasDeliveryUnits),
+                            'Service_Areas_DUs'
+                        );
+                        // Add Buildings sheet
+                        XLSX.utils.book_append_sheet(
+                            wb,
+                            XLSX.utils.json_to_sheet(gmapData.buildings),
+                            'Buildings'
+                        );
+                    }
+                    console.log(commCareData)
+                    if(commCareData) {
+                        // Add CommCare sheet
+                        XLSX.utils.book_append_sheet(
+                            wb,
+                            XLSX.utils.json_to_sheet(commCareData),
+                            'CommCare_Data'
+                        );
+                    }
+
+                    // Download the workbook
+                    XLSX.writeFile(wb, `OA_${selectedPolygonIndex + 1}_Data.xlsx`);
+
+                    showToast("Excel file downloaded with all data!", "success", 3000, "#4CAF50");
+                } catch (error) {
+                    console.error('Error generating Excel:', error);
+                    showToast(`Error: ${error.message}`, 'error', 5000, '#FF0000');
+                }
             }
         });
 
-        // Hide dropdown when clicking outside
-        document.addEventListener('click', (event) => {
-            if (!downloadBtn.contains(event.target) && !downloadMenu.contains(event.target)) {
-                downloadMenu.style.display = 'none';
-                downloadBtn.setAttribute('aria-expanded', 'false');
-            }
-        });
-
-        // Handle download options
-        document.getElementById('download-oa-wkt').addEventListener('click', () => {
-            downloadMenu.style.display = 'none';
-            downloadBtn.setAttribute('aria-expanded', 'false');
-            downloadOAWkt();
-        });
-
-        document.getElementById('download-csv-my-maps').addEventListener('click', () => {
-            downloadMenu.style.display = 'none';
-            downloadBtn.setAttribute('aria-expanded', 'false');
-            downloadGmapData();
-        });
-
-        document.getElementById('download-csv-commcare').addEventListener('click', () => {
-            downloadMenu.style.display = 'none';
-            downloadBtn.setAttribute('aria-expanded', 'false');
-            downloadCsvForCommCare();
-        });
 
     </script>
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
