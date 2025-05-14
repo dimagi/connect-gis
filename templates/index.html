@@ -183,7 +183,7 @@
                         <p id="grid-color" class="card-text">Cluster Color: <span class="color-box" style="background-color: transparent;"></span></p>
                         <p id="grid-buildings" class="card-text">Buildings in the Grid: 0</p>
                         <div class="mb-1" style="width: 30%;">
-                            <label for="neighbor-clusters" class="form-label">Reassign to Cluster:</label>
+                            <label for="neighbor-clusters" class="form-label">Reassign to Service Area:</label>
                             <div class="input-group">
                                 <select class="form-select" id="neighbor-clusters"></select>
                                 <button class="btn btn-success" id="reassign-cluster" onclick="reassignGridToCluster()">Reassign</button>
@@ -266,7 +266,7 @@
                                     <select id="select-sa" class="form-select select2" style="width: 100%"></select>
                                 </div>
                                 <div class="mb-3">
-                                    <label for="select-du" class="form-label">Select Grids:</label>
+                                    <label for="select-du" class="form-label">Select DUs:</label>
                                     <select id="select-du" class="form-select select2" style="width: 100%;" multiple></select>
                                 </div>
                                 <div class="mb-3" id="reassign-multi-grid" hidden>
@@ -2292,14 +2292,14 @@
 
             // Initialize or reinitialize Select2
             clusterSelect.select2({
-                placeholder: 'Select a cluster...',
+                placeholder: 'Select a Service Area...',
                 allowClear: true,
                 width: 'resolve'
             });
 
             // Initialize or reinitialize Select2
             gridReassignmentSelect.select2({
-                placeholder: 'Select a cluster...',
+                placeholder: 'Select a Service Area...',
                 allowClear: true
             });
 
@@ -2332,7 +2332,7 @@
             });
 
             gridSelect.select2({
-                placeholder: 'Select grids...',
+                placeholder: 'Select DUs...',
                 allowClear: true,
                 width: 'resolve',
                 closeOnSelect: false,
