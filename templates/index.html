@@ -620,6 +620,7 @@
                 enableOrDisableHtmlAttribute("download-btn", true);
             }
             highlightSelectedPolygon();
+            populateClusterDropdown(selectedPolygonIndex)
         }
 
         function highlightSelectedPolygon() {
@@ -1174,7 +1175,7 @@
         }
 
         function resetGridColor() {
-            if (selectedGridLayer && selectedPolygonIndex !== undefined && 
+            if (selectedPolygonIndex !== undefined &&
                 polygons[selectedPolygonIndex] && polygons[selectedPolygonIndex].gridLayer) {
                 const gridLayer = polygons[selectedPolygonIndex].gridLayer;
                 // Reset all grids to their original colors and opacity
