@@ -589,6 +589,7 @@
         }
 
         function updateSelectedPolygon() {
+            reSizeMap(mapDefaultHeight, true, true, true)
             selectedPolygonIndex = parseInt($('#polygonSelect').val());
             const totalBuildingCount = polygons.reduce((sum, p) => sum + (p.buildingCount || 0), 0);
             if (selectedPolygonIndex !== -1) {
@@ -618,7 +619,6 @@
                 enableOrDisableHtmlAttribute("clear-grids", true);
                 enableOrDisableHtmlAttribute("download-btn", true);
             }
-            reSizeMap(mapDefaultHeight, true)
             highlightSelectedPolygon();
         }
 
@@ -1219,14 +1219,13 @@
         }
 
         function handleGridClick(layer, feature, index, clickedFromUI) {
+            resetGridColor();
             if(index !== selectedPolygonIndex) {
                 selectedPolygonIndex = index;
                 $('#polygonSelect').val(selectedPolygonIndex);
                 updateSelectedPolygon()
                 populateClusterDropdown(selectedPolygonIndex)
             }
-
-            resetGridColor();
 
             selectedGridLayer = layer;
             selectedGridIndex = feature.properties.gridIndexNum - 1;
