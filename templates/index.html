@@ -1338,9 +1338,32 @@
                             `;
                         }, { sticky: true, direction: 'auto', opacity: 0.9 });
 
-                        layer.on('click', () => {
-                            handleGridClick(layer, feature, index, true)
-                        });
+                        layer.on('click', (e) => {
+                            let isMultiSelect = e.originalEvent.ctrlKey || e.originalEvent.metaKey
+                            let currentSelection = $('#select-du').val() || [];
+                            if(currentSelection.length === 0) isMultiSelect = false
+                            if (isMultiSelect) {
+                                const initialGridData = polygons[index].drawnGrids[currentSelection[0]].grid;
+                                if(index !== selectedPolygonIndex || initialGridData.properties.cluster !== feature.properties.cluster) {
+                                    showToast(`Multi Grid selection is allowed within same OA and same SA`, "error", 3000, "#FF0000");
+                                    return
+                                }
+                                const selectedValue = (feature.properties.gridIndexNum - 1).toString();
+                                const gridIndex = currentSelection.indexOf(selectedValue);
+                                if (gridIndex === -1) {
+                                    currentSelection.push(selectedValue);
+                                } else {
+                                    currentSelection.splice(gridIndex, 1);
+                                }
+
+                                // Update the select input and trigger the change
+                                $('#select-du')
+                                    .val(currentSelection)
+                                    .trigger('change.select2');
+                            } else {
+                                handleGridClick(layer, feature, index, true)
+                            }
+                        })
                     }
                 }
             }).addTo(densityLayer);
