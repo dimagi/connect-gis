@@ -29,7 +29,7 @@ try:
     # Ensure the directory exists
     os.makedirs(os.path.expanduser("~/.config/earthengine"), exist_ok=True)
 
-    # Write credentials from Render environment variable
+    # Write credentials from environment variable
     credentials_path = os.path.expanduser("~/.config/earthengine/credentials")
     if not os.path.exists(credentials_path):
         with open(credentials_path, "w") as f:
@@ -54,7 +54,7 @@ engine = create_engine(DB_CONNECTION_STRING)
 
 @app.route("/")
 def home():
-    host_url = os.getenv('HOST_URL', "https://map-clustering.onrender.com")
+    host_url = os.getenv('HOST_URL', "https://connectgis.dimagi.com")
     return render_template("index.html", host_url=host_url)
 
 
@@ -103,7 +103,7 @@ def optimized_balanced_kmeans_constrained_with_buildings_count(buildingsGDF, coo
     _, min_size, max_size = _calculate_cluster_sizes(n_samples, num_clusters, balance_tolerance)
 
     labels = _run_constrained_kmeans(coords, num_clusters, min_size, max_size)
-    return getClusters(buildingsGDF, coords, labels)
+    return getClustersData(buildingsGDF, coords, labels)
 
 
 def optimized_balanced_kmeans_constrained_with_no_of_clusters(buildingsGDF, coords, num_clusters=3,
@@ -124,9 +124,9 @@ def optimized_balanced_kmeans_constrained_with_no_of_clusters(buildingsGDF, coor
     _, min_size, max_size = _calculate_cluster_sizes(n_samples, num_clusters, balance_tolerance)
 
     labels = _run_constrained_kmeans(coords, num_clusters, min_size, max_size)
-    return getClusters(buildingsGDF, coords, labels)
+    return getClustersData(buildingsGDF, coords, labels)
 
-def getClusters(buildingsGDF, coords, cluster_labels):
+def getClustersData(buildingsGDF, coords, cluster_labels):
     cluster_counts = Counter(cluster_labels)
     # Convert the coordinates and their cluster labels into a list of dictionaries
     clusters = [
@@ -161,9 +161,9 @@ def getBuildingsDataFromGEE(polygon_coords, buildings_area_in_meters=0, building
             "Too many elements: The area contains more than 5000 buildings or grid cells. Please reduce the polygon size.")
     return buildings_geojson
 
-def getBuildingsDataFromDB_streamData(polygon_coords, buildings_area_in_meters=0, buildings_confidence=0):
+def getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters=0, buildings_confidence=0):
     """
-        Fetch buildings from the buildings table within the specified polygon.
+        Fetch buildings from the building table within the specified polygon.
 
         Args:
             polygon_coords (list): List of [lng, lat] coordinates defining the polygon.
@@ -400,7 +400,7 @@ def handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of
         buildings_geojson = getBuildingsDataFromGEE(polygon_coords)
     else:
         try:
-            buildings_geojson = getBuildingsDataFromDB_streamData(polygon_coords, buildings_area_in_meters, buildings_confidence)
+            buildings_geojson = getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters, buildings_confidence)
         except Exception as e:
             return jsonify({"error": f"Error fetching buildings from database: {str(e)}"}), 500
 
@@ -413,8 +413,6 @@ def handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of
 
     coordinates = np.array(coordinates)
     buildings_count = len(coordinates)
-    kVal = int(buildings_count / no_of_buildings)
-
     clusters = None
 
     if (fetchClusters):
@@ -762,7 +760,7 @@ def get_building_density_v2():
             return jsonify({"error": "Invalid polygon coordinates"}), 400
 
         # Fetch buildings
-        buildings_geojson = getBuildingsDataFromDB_streamData(polygon_coords, buildings_area_in_meters, buildings_confidence)
+        buildings_geojson = getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters, buildings_confidence)
         if not buildings_geojson['features']:
             return jsonify({"message": "No buildings found within the polygon", "building_count": 0}), 404
 
