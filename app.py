@@ -37,10 +37,7 @@ try:
     ee.Initialize(
         opt_url='https://earthengine-highvolume.googleapis.com'
     )
-    buildings = (ee.FeatureCollection("GOOGLE/Research/open-buildings/v3/polygons")
-                 # .filter(ee.Filter.gt('confidence', 0.7))
-                 .filter(ee.Filter.gt('area_in_meters', 5))
-                 )
+    buildings = ee.FeatureCollection("GOOGLE/Research/open-buildings/v3/polygons")
 except Exception as e:
     print(f"Error initializing Earth Engine: {e}")
 
@@ -144,7 +141,7 @@ def getClusters(buildingsGDF, coords, cluster_labels):
 
     return clusters
 
-def getBuildingsDataFromGEE(polygon_coords):
+def getBuildingsDataFromGEE(polygon_coords, buildings_area_in_meters=0, buildings_confidence=0):
     if not polygon_coords:
         return jsonify({"error": "Invalid polygon coordinates"}), 400
 
@@ -152,6 +149,11 @@ def getBuildingsDataFromGEE(polygon_coords):
     region = ee.Geometry.Polygon(polygon_coords)
     # Filter buildings inside the polygon
     filtered_buildings = buildings.filterBounds(region)
+    if buildings_area_in_meters > 0:
+        filtered_buildings.filter(ee.Filter.gt('area_in_meters', buildings_area_in_meters))
+    if buildings_confidence > 0:
+        filtered_buildings.filter(ee.Filter.gt('confidence', buildings_confidence))
+
     try:
         buildings_geojson = filtered_buildings.getInfo()
     except ee.EEException as e:
@@ -243,7 +245,7 @@ def get_building_density():
         clustering_type = data.get("clusteringType")
         no_of_clusters = int(data.get("noOfClusters", 3))
         no_of_buildings = int(data.get("noOfBuildings", 250))
-        buildings_area_in_metres = int(data.get("buildingsAreaInMetres", 0))
+        buildings_area_in_meters = int(data.get("buildingsAreaInMeters", 0))
         buildings_confidence = int(data.get("buildingsConfidence", 0)) / 100
         tolerance = float(data.get("thresholdVal", 10)) / 100  # Percentage to decimal
         fetchClusters = bool(data.get("fetchClusters", False))
@@ -253,7 +255,7 @@ def get_building_density():
             result = handle_bottom_up_clustering(data, no_of_clusters, no_of_buildings, tolerance)
         else:
             result = handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of_buildings, tolerance,
-                                                     fetchClusters, dbType, buildings_area_in_metres, buildings_confidence)
+                                                     fetchClusters, dbType, buildings_area_in_meters, buildings_confidence)
         return result
     except Exception as e:
         return jsonify({"error": str(e)}), 400
