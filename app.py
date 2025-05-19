@@ -161,12 +161,14 @@ def getBuildingsDataFromGEE(polygon_coords, buildings_area_in_meters=0, building
             "Too many elements: The area contains more than 5000 buildings or grid cells. Please reduce the polygon size.")
     return buildings_geojson
 
-def getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters=0, buildings_confidence=0):
+def getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters=0.0, buildings_confidence=0.0):
     """
         Fetch buildings from the building table within the specified polygon.
 
-        Args:
-            polygon_coords (list): List of [lng, lat] coordinates defining the polygon.
+    Args:
+        polygon_coords (list): List of [lng, lat] coordinates defining the polygon.
+        buildings_area_in_meters (float): Minimum building area to filter by (only applied if > 0)
+        buildings_confidence (float): Minimum confidence score to filter by (only applied if > 0)
 
         Returns:
             dict: GeoJSON FeatureCollection with building features.
@@ -177,25 +179,38 @@ def getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters=0, buildings
     polygon = Polygon(polygon_coords)
     polygon_wkt = polygon.wkt
 
+    # Base query without filters
     query = """
-        SELECT
-            id,
-            latitude,
-            longitude,
-            area_in_meters,
-            confidence,
-            record_id,
-            ST_AsGeoJSON(ST_GeometryN(geometry, 1)) as geometry
-        FROM buildings
-        WHERE ST_Within(geometry, ST_GeomFromText(%s, 4326)) and area_in_meters >= %s and confidence >= %s;
-        """
+            SELECT id, \
+                   latitude, \
+                   longitude, \
+                   area_in_meters, \
+                   confidence, \
+                   record_id, \
+                   ST_AsGeoJSON(ST_GeometryN(geometry, 1)) as geometry
+            FROM buildings
+            WHERE ST_Within(geometry, ST_GeomFromText(%s, 4326)) \
+            """
+
+    # Add filters only if values are greater than 0
+    params = [polygon_wkt]
+
+    if buildings_area_in_meters > 0:
+        query += " AND area_in_meters >= %s"
+        params.append(buildings_area_in_meters)
+
+    if buildings_confidence > 0:
+        query += " AND confidence >= %s"
+        params.append(buildings_confidence)
+
+    query += ";"  # Add final semicolon
 
     conn = None
     cur = None
     try:
         conn = engine.raw_connection()
         cur = conn.cursor()
-        cur.execute(query, (polygon_wkt, buildings_area_in_meters, buildings_confidence,))
+        cur.execute(query, tuple(params))
 
         # Build features incrementally
         features = []
@@ -245,8 +260,8 @@ def get_building_density():
         clustering_type = data.get("clusteringType")
         no_of_clusters = int(data.get("noOfClusters", 3))
         no_of_buildings = int(data.get("noOfBuildings", 250))
-        buildings_area_in_meters = int(data.get("buildingsAreaInMeters", 0))
-        buildings_confidence = int(data.get("buildingsConfidence", 0)) / 100
+        buildings_area_in_meters = float(data.get("buildingsAreaInMeters", 0))
+        buildings_confidence = float(data.get("buildingsConfidence", 0)) / 100
         tolerance = float(data.get("thresholdVal", 10)) / 100  # Percentage to decimal
         fetchClusters = bool(data.get("fetchClusters", False))
         dbType = data.get("dbType")
@@ -754,8 +769,8 @@ def get_building_density_v2():
         num_clusters = int(data.get("noOfClusters", 3))
         tolerance = float(data.get("thresholdVal", 10)) / 100
         grid_size = int(data.get("gridLength", 50))
-        buildings_area_in_meters = int(data.get("buildingsAreaInMeters", 0))
-        buildings_confidence = int(data.get("buildingsConfidence", 0)) / 100
+        buildings_area_in_meters = float(data.get("buildingsAreaInMeters", 0))
+        buildings_confidence = float(data.get("buildingsConfidence", 0)) / 100
         if not polygon_coords:
             return jsonify({"error": "Invalid polygon coordinates"}), 400
 
