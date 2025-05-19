@@ -290,6 +290,14 @@
                                     <label for="noOfFLWs" class="form-label">Number of Field Workers:</label>
                                     <input type="number" class="form-control" id="noOfFLWs" value="25">
                                 </div>
+                                <div class="mb-3">
+                                    <label for="buildingsAreaInMeters" class="form-label">Buildings Area in metres:</label>
+                                    <input type="number" class="form-control" id="buildingsAreaInMeters" step="0.01" value="5" min="0">
+                                </div>
+                                <div class="mb-3">
+                                    <label for="buildingsConfidence" class="form-label">Buildings Confidence in %:</label>
+                                    <input type="number" class="form-control" id="buildingsConfidence" step="0.01" value="0" min="0" max="100">
+                                </div>
                             </div>
                         </div>
 
@@ -701,7 +709,7 @@
         function toggleInputFields() {
             const method = $('#clusteringType').val();
             $('#noOfClustersIP, #noOfBuildingsIP, #thresholdValueIP').addClass('d-none');
-            $('#gridLengthIP, #thresholdValueIP').removeClass('d-none');
+            $('#gridLengthIP, #thresholdValueIP, #buildingsAreaInMeters, #buildingsConfidence').removeClass('d-none');
 
             if (method === "kMeans") {
                 $('#noOfClustersIP').removeClass('d-none');
@@ -2087,7 +2095,7 @@
             })
         }
 
-        function validateClusteringInputs(clusteringType, pinLatLng, polygon) {
+        function validateClusteringInputs(clusteringType, pinLatLng, polygon, buildingsAreaInMeters, buildingsConfidence) {
             const showWarning = (message) => {
                 showToast(message, "warning", 3000, "#FFA500");
                 $('#run-clustering, #clear-oa, #download-oa-wkt').prop('disabled', false);
@@ -2098,6 +2106,14 @@
             }
             if (clusteringType !== "bottomUp" && (!polygon || polygon.length === 0)) {
                 showWarning("Please draw a polygon on the map first.");
+                return false;
+            }
+            if(buildingsAreaInMeters < 0) {
+                showWarning("Please enter a valid value for buildings area in metres.");
+                return false;
+            }
+            if(buildingsConfidence < 0) {
+                showWarning("Please enter a valid value for buildings confidence.");
                 return false;
             }
             return true;
@@ -2127,8 +2143,10 @@
             let noOfBuildings = $('#noOfBuildings').val();
             if (noOfBuildings <= 0) noOfBuildings = 1;
             const gridLength = $('#gridLength').val();
+            const buildingsAreaInMeters = $('#buildingsAreaInMeters').val();
+            const buildingsConfidence = $('#buildingsConfidence').val();
 
-            if (!validateClusteringInputs(clusteringType, pinLatLng, polygon)) {
+            if (!validateClusteringInputs(clusteringType, pinLatLng, polygon, buildingsAreaInMeters, buildingsConfidence)) {
                 return;
             }
 
@@ -2141,7 +2159,9 @@
                 gridLength,
                 thresholdVal,
                 fetchClusters,
-                dbType
+                dbType,
+                buildingsAreaInMeters,
+                buildingsConfidence
             };
             showToast('Fetching data...', 'info', undefined, '#ff9300');
             let url = 'get_building_density';
@@ -2233,6 +2253,23 @@
                     // Clear any existing polygons
                     clearOA();
                 }
+                $('#buildingsConfidence').on('change', function() {
+                    if (this.value < 0) {
+                        this.value = 0;
+                        showToast(`Value cannot be negative. Set to 0.`, "warning", 3000, "#FFA500");
+                    }
+                });
+                $('#buildingsAreaInMeters').on('change', function() {
+                    if (this.value < 0) {
+                        this.value = 0;
+                        showToast(`Value cannot be negative. Set to 0.`, "warning", 3000, "#FFA500");
+                    }
+                    if (this.value > 100) {
+                        this.value = 100;
+                        showToast(`Percentage cannot be > 100. Set to 100.`, "warning", 3000, "#FFA500");
+                    }
+                });
+
             });
 
             // Trigger initial state
