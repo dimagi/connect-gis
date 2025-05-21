@@ -1752,16 +1752,26 @@
             });
         }
 
-        function getGmapData() {
-            const polygonData = polygons[selectedPolygonIndex];
+        function getOAWktData(polygonIndex) {
+            const polygonData = polygons[polygonIndex];
+            const coordsStr = polygonData.latlngs.map(coord => `${coord[0]} ${coord[1]}`).join(', ');
+            const wkt = `POLYGON ((${coordsStr}))`;
+            return [{
+                'OA Number': polygonIndex + 1,
+                'OA WKT': wkt
+            }];
+        }
+
+        function getGmapData(polygonIndex) {
+            const polygonData = polygons[polygonIndex];
             const processedData = polygonData?.processedData;
             if (!polygonData || !polygonData.processedData) {
-                console.error("No processed data available for download at index:", index, polygonData);
-                return;
+                console.error("No processed data available for download at index:", polygonIndex, polygonData);
+                return null;
             }
             if (!processedData.clusters.size && !processedData.grids.size && !processedData.buildings.size) {
                 console.error("No processed data available for download");
-                return;
+                return null;
             }
             // Prepare service areas and delivery units data
             const saDuData = [];
@@ -1771,7 +1781,7 @@
                     Name: `SA ${parseInt(cluster.clusterId) + 1}`,
                     Description: cluster.buildingCount,
                     SA: '-',
-                    OA: selectedPolygonIndex + 1
+                    OA: polygonIndex + 1
                 });
             });
 
@@ -1782,7 +1792,7 @@
                         Name: `DU ${index + 1}`,
                         Description: grid.buildingCount,
                         SA: parseInt(grid.clusterId) + 1,
-                        OA: selectedPolygonIndex + 1
+                        OA: polygonIndex + 1
                     });
                 }
             });
@@ -1794,7 +1804,7 @@
                 const gridIndex = building.gridIndex !== undefined ? building.gridIndex + 1 : "N/A";
                 buildingsData.push({
                     Name: `Building ${index + 1}`,
-                    OA: selectedPolygonIndex + 1,
+                    OA: polygonIndex + 1,
                     SA: parseInt(building.clusterId) + 1,
                     DU: gridIndex,
                     Latitude: building.coordinates[1],
@@ -1863,16 +1873,16 @@
             return flwAssignments;
         }
 
-        function getCommCareData() {
-            const polygonData = polygons[selectedPolygonIndex];
+        function getCommCareData(polygonIndex) {
+            const polygonData = polygons[polygonIndex];
             const processedData = polygonData?.processedData;
             if (!polygonData || !polygonData.processedData) {
-                console.error("No processed data available for download at index:", index, polygonData);
-                return;
+                console.error("No processed data available for download at index:", polygonIndex, polygonData);
+                return null;
             }
             if (!processedData.clusters.size && !processedData.grids.size && !processedData.buildings.size) {
                 console.error("No processed data available for download");
-                return;
+                return null;
             }
             const flwAssignments = createFLWAssignments(processedData);
 
@@ -1906,7 +1916,7 @@
                     Distance_Between_Adj_Sides_2: heightMeters,
                     Buildings_Count: grid.buildingCount,
                     Surface_Area_sq_meters: surfaceArea,
-                    OA: selectedPolygonIndex + 1
+                    OA: polygonIndex + 1
                 });
             });
 
@@ -2214,13 +2224,6 @@
                 });
         }
 
-        function getOAWktData() {
-            const polygonData = polygons[selectedPolygonIndex];
-            const coordsStr = polygonData.latlngs.map(coord => `${coord[0]} ${coord[1]}`).join(', ');
-            const wkt = `POLYGON ((${coordsStr}))`;
-            return [{ 'OA Wkt': wkt }];
-        }
-
         $(document).ready(function () {
             toggleInputFields();
             $('#sidebar-toggle-btn').on('click', toggleSidebar);
@@ -2506,47 +2509,71 @@
         downloadBtn.addEventListener('click', () => {
             if (!downloadBtn.disabled) {
                 try {
-                    // Get all data
-                    const oaWktData = getOAWktData();
-                    const gmapData = getGmapData();
-                    const commCareData = getCommCareData();
+                    // Initialize arrays to store data from all polygons
+                    const allOaWktData = [];
+                    const allServiceAreasDeliveryUnits = [];
+                    const allBuildings = [];
+                    const allCommCareData = [];
+
+                    // Iterate through all polygons
+                    polygons.forEach((_, index) => {
+                        // Get OA WKT data
+                        const oaWktData = getOAWktData(index);
+                        if (oaWktData) {
+                            allOaWktData.push(...oaWktData);
+                        }
+
+                        // Get GMap data
+                        const gmapData = getGmapData(index);
+                        console.log(index)
+                        if (gmapData) {
+                            console.log(gmapData)
+                            allServiceAreasDeliveryUnits.push(...gmapData.serviceAreasDeliveryUnits);
+                            allBuildings.push(...gmapData.buildings);
+                        }
+
+                        // Get CommCare data
+                        const commCareData = getCommCareData(index);
+                        if (commCareData) {
+                            console.log(commCareData)
+                            allCommCareData.push(...commCareData);
+                        }
+                    });
 
                     // Create workbook with multiple sheets
                     const wb = XLSX.utils.book_new();
 
-                    // Add OA WKT sheet
-                    XLSX.utils.book_append_sheet(
-                        wb,
-                        XLSX.utils.json_to_sheet(oaWktData),
-                        'OA_WKT'
-                    );
+                    // Add OA WKT sheet with proper column headers
+                    if (allOaWktData.length > 0) {
+                        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(allOaWktData), 'OA_WKT');
+                    }
 
-                    if(gmapData)  {
+                    if(allServiceAreasDeliveryUnits.length > 0)  {
                         // Add Service Areas & Delivery Units sheet
                         XLSX.utils.book_append_sheet(
                             wb,
-                            XLSX.utils.json_to_sheet(gmapData.serviceAreasDeliveryUnits),
+                            XLSX.utils.json_to_sheet(allServiceAreasDeliveryUnits),
                             'Service_Areas_DUs'
                         );
                         // Add Buildings sheet
                         XLSX.utils.book_append_sheet(
                             wb,
-                            XLSX.utils.json_to_sheet(gmapData.buildings),
+                            XLSX.utils.json_to_sheet(allBuildings),
                             'Buildings'
                         );
                     }
-                    console.log(commCareData)
-                    if(commCareData) {
+
+                    if(allCommCareData.length > 0) {
                         // Add CommCare sheet
                         XLSX.utils.book_append_sheet(
                             wb,
-                            XLSX.utils.json_to_sheet(commCareData),
+                            XLSX.utils.json_to_sheet(allCommCareData),
                             'CommCare_Data'
                         );
                     }
 
                     // Download the workbook
-                    XLSX.writeFile(wb, `OA_${selectedPolygonIndex + 1}_Data.xlsx`);
+                    XLSX.writeFile(wb, `All_OAs_Data.xlsx`);
 
                     showToast("Excel file downloaded with all data!", "success", 3000, "#4CAF50");
                 } catch (error) {
