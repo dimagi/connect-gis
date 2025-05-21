@@ -2525,9 +2525,7 @@
 
                         // Get GMap data
                         const gmapData = getGmapData(index);
-                        console.log(index)
                         if (gmapData) {
-                            console.log(gmapData)
                             allServiceAreasDeliveryUnits.push(...gmapData.serviceAreasDeliveryUnits);
                             allBuildings.push(...gmapData.buildings);
                         }
@@ -2535,7 +2533,6 @@
                         // Get CommCare data
                         const commCareData = getCommCareData(index);
                         if (commCareData) {
-                            console.log(commCareData)
                             allCommCareData.push(...commCareData);
                         }
                     });
