@@ -24,7 +24,7 @@ load_dotenv()
 
 # Fetch GEE credentials from environment variable
 GEE_CREDS = os.getenv("GEE_CREDS", "{}")
-
+GEE_PROJECT_NAME = os.getenv("GEE_PROJECT_NAME", "")
 try:
     # Ensure the directory exists
     os.makedirs(os.path.expanduser("~/.config/earthengine"), exist_ok=True)
@@ -35,6 +35,7 @@ try:
         with open(credentials_path, "w") as f:
             f.write(GEE_CREDS)
     ee.Initialize(
+        project= GEE_PROJECT_NAME,
         opt_url='https://earthengine-highvolume.googleapis.com'
     )
     buildings = ee.FeatureCollection("GOOGLE/Research/open-buildings/v3/polygons")
@@ -181,7 +182,8 @@ def getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters=0.0, buildin
 
     # Base query without filters
     query = """
-            SELECT id, \
+            SELECT DISTINCT ON (latitude, longitude) \
+                id, \
                    latitude, \
                    longitude, \
                    area_in_meters, \
