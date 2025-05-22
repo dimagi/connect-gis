@@ -105,7 +105,7 @@ GEE_PROJECT_NAME=<your-google-earth-engine-project-name>
 
 ## Important Notes
 - **Local Development**: Authentication via **earthengine authenticate** is sufficient for local use (no credentials needed in **.env**)
-- **Production / Other Envinorments**: ou must add the appropriate GEE credentials to your .env file:
+- **Production / Other Environments**: You must add the appropriate GEE credentials to your .env file:
 ```dotenv
 GEE_CREDS=<your-service-account-credentials-json>
 ```
