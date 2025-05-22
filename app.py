@@ -162,7 +162,7 @@ def getBuildingsDataFromGEE(polygon_coords, buildings_area_in_meters=0, building
             "Too many elements: The area contains more than 5000 buildings or grid cells. Please reduce the polygon size.")
     return buildings_geojson
 
-def getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters=0.0, buildings_confidence=0.0):
+def getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters=0.0, buildings_confidence=0.0, fetchWithRecordId=False):
     """
         Fetch buildings from the building table within the specified polygon.
 
@@ -204,6 +204,9 @@ def getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters=0.0, buildin
     if buildings_confidence > 0:
         query += " AND confidence >= %s"
         params.append(buildings_confidence)
+
+    if fetchWithRecordId:
+        query += " AND record_id IS NOT NULL"
 
     query += ";"  # Add final semicolon
 
@@ -267,12 +270,14 @@ def get_building_density():
         tolerance = float(data.get("thresholdVal", 10)) / 100  # Percentage to decimal
         fetchClusters = bool(data.get("fetchClusters", False))
         dbType = data.get("dbType")
+        fetchWithRecordId = bool(data.get("fetchWithRecordId", False))
+
 
         if clustering_type == "bottomUp":
             result = handle_bottom_up_clustering(data, no_of_clusters, no_of_buildings, tolerance)
         else:
             result = handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of_buildings, tolerance,
-                                                     fetchClusters, dbType, buildings_area_in_meters, buildings_confidence)
+                                                     fetchClusters, dbType, buildings_area_in_meters, buildings_confidence, fetchWithRecordId)
         return result
     except Exception as e:
         return jsonify({"error": str(e)}), 400
@@ -409,7 +414,7 @@ def handle_bottom_up_clustering(data, no_of_clusters, no_of_buildings, tolerance
 
 
 def handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of_buildings, tolerance, fetchClusters,
-                                    dbType, buildings_area_in_meters, buildings_confidence,):
+                                    dbType, buildings_area_in_meters, buildings_confidence,  fetchWithRecordId):
     polygon_coords = data.get("polygon", [])
     if not polygon_coords:
         return jsonify({"error": "Invalid polygon coordinates"}), 400
@@ -417,7 +422,7 @@ def handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of
         buildings_geojson = getBuildingsDataFromGEE(polygon_coords)
     else:
         try:
-            buildings_geojson = getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters, buildings_confidence)
+            buildings_geojson = getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters, buildings_confidence, fetchWithRecordId)
         except Exception as e:
             return jsonify({"error": f"Error fetching buildings from database: {str(e)}"}), 500
 
@@ -771,13 +776,14 @@ def get_building_density_v2():
         num_clusters = int(data.get("noOfClusters", 3))
         tolerance = float(data.get("thresholdVal", 10)) / 100
         grid_size = int(data.get("gridLength", 50))
+        fetchWithRecordId = bool(data.get("fetchWithRecordId", False))
         buildings_area_in_meters = float(data.get("buildingsAreaInMeters", 0))
         buildings_confidence = float(data.get("buildingsConfidence", 0)) / 100
         if not polygon_coords:
             return jsonify({"error": "Invalid polygon coordinates"}), 400
 
         # Fetch buildings
-        buildings_geojson = getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters, buildings_confidence)
+        buildings_geojson = getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters, buildings_confidence, fetchWithRecordId)
         if not buildings_geojson['features']:
             return jsonify({"message": "No buildings found within the polygon", "building_count": 0}), 404
 

@@ -298,6 +298,17 @@
                                     <label for="buildingsConfidence" class="form-label">Buildings Confidence in %:</label>
                                     <input type="number" class="form-control" id="buildingsConfidence" step="0.01" value="0" min="0" max="100">
                                 </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Filter by Building Full Plus code:</label>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="recordIdFilter" id="filterWithRecordId" value="true" checked>
+                                        <label class="form-check-label" for="filterWithRecordId">Only Buildings with Full Plus code</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="recordIdFilter" id="filterWithoutRecordId" value="false">
+                                        <label class="form-check-label" for="filterWithoutRecordId">All Buildings</label>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -2155,6 +2166,7 @@
             const gridLength = $('#gridLength').val();
             const buildingsAreaInMeters = $('#buildingsAreaInMeters').val();
             const buildingsConfidence = $('#buildingsConfidence').val();
+            const fetchWithRecordId = $('input[name="recordIdFilter"]:checked').val() === 'true';
 
             if (!validateClusteringInputs(clusteringType, pinLatLng, polygon, buildingsAreaInMeters, buildingsConfidence)) {
                 return;
@@ -2171,7 +2183,8 @@
                 fetchClusters,
                 dbType,
                 buildingsAreaInMeters,
-                buildingsConfidence
+                buildingsConfidence,
+                fetchWithRecordId
             };
             showToast('Fetching data...', 'info', undefined, '#ff9300');
             let url = 'get_building_density';
