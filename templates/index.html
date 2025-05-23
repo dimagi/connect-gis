@@ -2687,6 +2687,7 @@
             // Set buildingsConfidence to 0 if both MS and OSM are selected
             const shouldIgnoreConfidence = buildingSourceFilter.includes('MS') || buildingSourceFilter.includes('OSM');
             const finalBuildingsConfidence = shouldIgnoreConfidence ? 0 : buildingConfidence;
+            const fetchWithRecordId = !buildingSourceFilter.includes('MS');
             const polygon = polygons[selectedPolygonIndex];
 
             // Show loading state
@@ -2699,7 +2700,8 @@
                 buildingsAreaInMeters: buildingArea,
                 buildingsConfidence: finalBuildingsConfidence,
                 buildingSourceFilter: buildingSourceFilter,
-                fetchClusters: false
+                fetchClusters: false,
+                fetchWithRecordId
             };
 
             // Make API call
