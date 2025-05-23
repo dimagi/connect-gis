@@ -162,7 +162,7 @@ def getBuildingsDataFromGEE(polygon_coords, buildings_area_in_meters=0, building
             "Too many elements: The area contains more than 5000 buildings or grid cells. Please reduce the polygon size.")
     return buildings_geojson
 
-def getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters=0.0, buildings_confidence=0.0, fetchWithRecordId=False):
+def getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters=0.0, buildings_confidence=0.0, fetchWithRecordId=False, buildingSourceFilter=None):
     """
         Fetch buildings from the building table within the specified polygon.
 
@@ -170,6 +170,8 @@ def getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters=0.0, buildin
         polygon_coords (list): List of [lng, lat] coordinates defining the polygon.
         buildings_area_in_meters (float): Minimum building area to filter by (only applied if > 0)
         buildings_confidence (float): Minimum confidence score to filter by (only applied if > 0)
+        fetchWithRecordId (bool): If True, only return records with non-null record_id.
+        buildingSourceFilter (str or list): One or more of ["Google", "Microsoft", "OSM"]
 
         Returns:
             dict: GeoJSON FeatureCollection with building features.
@@ -180,35 +182,47 @@ def getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters=0.0, buildin
     polygon = Polygon(polygon_coords)
     polygon_wkt = polygon.wkt
 
-    # Base query without filters
+    # Base query
     query = """
-            SELECT DISTINCT ON (latitude, longitude) \
-                id, \
-                   latitude, \
-                   longitude, \
-                   area_in_meters, \
-                   confidence, \
-                   record_id, \
-                   ST_AsGeoJSON(ST_GeometryN(geometry, 1)) as geometry
+            SELECT DISTINCT ON (latitude, longitude)
+                id,
+                latitude,
+                longitude,
+                area_in_meters,
+                confidence,
+                record_id,
+                ST_AsGeoJSON(ST_GeometryN(geometry, 1)) as geometry
             FROM buildings
-            WHERE ST_Within(geometry, ST_GeomFromText(%s, 4326)) \
+            WHERE ST_Within(geometry, ST_GeomFromText(%s, 4326))
             """
-
-    # Add filters only if values are greater than 0
     params = [polygon_wkt]
 
     if buildings_area_in_meters > 0:
         query += " AND area_in_meters >= %s"
         params.append(buildings_area_in_meters)
 
-    if buildings_confidence > 0:
-        query += " AND confidence >= %s"
-        params.append(buildings_confidence)
+    # Add source condition
+    source_conditions = []
+    if buildingSourceFilter:
+        if "GEE" in buildingSourceFilter:
+            if buildings_confidence > 0:
+                source_conditions.append("(record_id IS NOT NULL AND confidence >= %s)")
+                params.append(buildings_confidence)
+            else:
+                source_conditions.append("(record_id IS NOT NULL AND confidence IS NOT NULL)")
+        if "MS" in buildingSourceFilter:
+            source_conditions.append("(record_id IS NULL AND confidence IS NULL)")
+        if "OSM" in buildingSourceFilter:
+            source_conditions.append("(record_id IS NOT NULL AND confidence IS NULL)")
+        if source_conditions:
+            query += " AND (" + " OR ".join(source_conditions) + ")"
+    else:
+        if buildings_confidence > 0:
+            query += " AND confidence >= %s"
+            params.append(buildings_confidence)
 
-    if fetchWithRecordId:
-        query += " AND record_id IS NOT NULL"
-
-    query += ";"  # Add final semicolon
+        if fetchWithRecordId:
+            query += " AND record_id IS NOT NULL"
 
     conn = None
     cur = None
@@ -271,13 +285,15 @@ def get_building_density():
         fetchClusters = bool(data.get("fetchClusters", False))
         dbType = data.get("dbType")
         fetchWithRecordId = bool(data.get("fetchWithRecordId", False))
+        buildingSourceFilter = data.get("buildingSourceFilter", [])
 
 
         if clustering_type == "bottomUp":
             result = handle_bottom_up_clustering(data, no_of_clusters, no_of_buildings, tolerance)
         else:
             result = handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of_buildings, tolerance,
-                                                     fetchClusters, dbType, buildings_area_in_meters, buildings_confidence, fetchWithRecordId)
+                                                     fetchClusters, dbType, buildings_area_in_meters, buildings_confidence,
+                                                     fetchWithRecordId, buildingSourceFilter)
         return result
     except Exception as e:
         return jsonify({"error": str(e)}), 400
@@ -414,7 +430,8 @@ def handle_bottom_up_clustering(data, no_of_clusters, no_of_buildings, tolerance
 
 
 def handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of_buildings, tolerance, fetchClusters,
-                                    dbType, buildings_area_in_meters, buildings_confidence,  fetchWithRecordId):
+                                    dbType, buildings_area_in_meters, buildings_confidence,  fetchWithRecordId, buildingSourceFilter
+):
     polygon_coords = data.get("polygon", [])
     if not polygon_coords:
         return jsonify({"error": "Invalid polygon coordinates"}), 400
@@ -422,7 +439,7 @@ def handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of
         buildings_geojson = getBuildingsDataFromGEE(polygon_coords)
     else:
         try:
-            buildings_geojson = getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters, buildings_confidence, fetchWithRecordId)
+            buildings_geojson = getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters, buildings_confidence, fetchWithRecordId, buildingSourceFilter)
         except Exception as e:
             return jsonify({"error": f"Error fetching buildings from database: {str(e)}"}), 500
 
@@ -779,11 +796,13 @@ def get_building_density_v2():
         fetchWithRecordId = bool(data.get("fetchWithRecordId", False))
         buildings_area_in_meters = float(data.get("buildingsAreaInMeters", 0))
         buildings_confidence = float(data.get("buildingsConfidence", 0)) / 100
+        buildingSourceFilter = data.get("buildingSourceFilter", [])
+
         if not polygon_coords:
             return jsonify({"error": "Invalid polygon coordinates"}), 400
 
         # Fetch buildings
-        buildings_geojson = getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters, buildings_confidence, fetchWithRecordId)
+        buildings_geojson = getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters, buildings_confidence, fetchWithRecordId, buildingSourceFilter)
         if not buildings_geojson['features']:
             return jsonify({"message": "No buildings found within the polygon", "building_count": 0}), 404
 

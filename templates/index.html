@@ -247,7 +247,7 @@
                                     <div class="input-group">
                                         <select id="buildingSourceFilter" class="form-select select2" multiple="multiple" style="width: 100%">
                                             <option value="OSM" class="osm-option">Open Street Map Buildings</option>
-                                            <option value="GEE" selected disabled>Google Open Buildings</option>
+                                            <option value="GEE" selected>Google Open Buildings</option>
                                             <option value="MS">Microsoft ML Buildings</option>
                                         </select>
                                     </div>
@@ -2201,7 +2201,8 @@
                 dbType,
                 buildingsAreaInMeters,
                 buildingsConfidence: finalBuildingsConfidence,
-                fetchWithRecordId
+                fetchWithRecordId,
+                buildingSourceFilter
             };
             showToast('Fetching data...', 'info', undefined, '#ff9300');
             let url = 'get_building_density';
@@ -2346,6 +2347,7 @@
                     } else {
                         // If confidence is 0, show OSM option
                         osmOption.show();
+                        $('#buildingSourceFilter').trigger('change');
                     }
                 });
 
