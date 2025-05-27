@@ -436,7 +436,7 @@ def handle_polygon_based_clustering(data, clustering_type, no_of_clusters, no_of
     if not polygon_coords:
         return jsonify({"error": "Invalid polygon coordinates"}), 400
     if dbType == 'GEE':
-        buildings_geojson = getBuildingsDataFromGEE(polygon_coords)
+        buildings_geojson = getBuildingsDataFromGEE(polygon_coords, buildings_area_in_meters, buildings_confidence)
     else:
         try:
             buildings_geojson = getBuildingsDataFromDB(polygon_coords, buildings_area_in_meters, buildings_confidence, fetchWithRecordId, buildingSourceFilter)
