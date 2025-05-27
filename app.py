@@ -151,9 +151,9 @@ def getBuildingsDataFromGEE(polygon_coords, buildings_area_in_meters=0, building
     # Filter buildings inside the polygon
     filtered_buildings = buildings.filterBounds(region)
     if buildings_area_in_meters > 0:
-        filtered_buildings.filter(ee.Filter.gt('area_in_meters', buildings_area_in_meters))
+        filtered_buildings = filtered_buildings.filter(ee.Filter.gt('area_in_meters', buildings_area_in_meters))
     if buildings_confidence > 0:
-        filtered_buildings.filter(ee.Filter.gt('confidence', buildings_confidence))
+        filtered_buildings = filtered_buildings.filter(ee.Filter.gt('confidence', buildings_confidence))
 
     try:
         buildings_geojson = filtered_buildings.getInfo()
