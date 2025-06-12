@@ -205,3 +205,35 @@ GEE_CREDS=<your-service-account-credentials-json>
 - **Database Connection Error**: Check PostgreSQL credentials and ensure the database is accessible.
 - **No Buildings Found**: Ensure the polygon or pin coordinates are valid and contain buildings in the database or GEE dataset.
 - **Clustering Issues**: Adjust `thresholdVal` or reduce `noOfClusters`/`noOfBuildings` if clustering fails due to insufficient data.
+
+
+## Deployment
+The [Connect GIS app](https://connectgis.dimagi.com/) is hosted on AWS by running a dockerized version of the app on the EC2 instance. The database is hosted as an AWS RDS service. 
+
+### Deploying changes
+In order to deploy new change you need access to the production server on AWS (the details and credentials is in 1Password - search for "ConnectGIS").
+
+Deploying new changes requires the following steps:
+
+```bash
+# Navigate to folder
+cd projects/dimagi-map-project/
+
+# Pull latest changes
+git pull
+
+# Build the docker image
+docker build -t map-clustering .
+
+# Stop the existing running container
+docker stop map-clustering
+
+# Remove the named instance
+docker container remove map-clustering
+
+# Run the new image with the port binding
+docker run -d -p 5010:5000 --name map-clustering map-clustering
+```
+
+### Updating environment variables
+The production environment file also lives in 1Password, but you'll also need to update the `.env` on the server (`~/projects/connect-gis/.env`). 
