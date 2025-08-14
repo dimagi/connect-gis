@@ -109,6 +109,64 @@ GEE_PROJECT_NAME=<your-google-earth-engine-project-name>
 ```dotenv
 GEE_CREDS=<your-service-account-credentials-json>
 ```
+
+# Building Data Insertion Guide
+
+## Overview
+The building data insertion system downloads building footprint data from [Overture Maps](https://overturemaps.org/) and loads it into a PostgreSQL database for use by the clustering application. This is a one-time setup process required before using the main application.
+
+## What it Does
+- Downloads building footprint data for an entire country from Overture Maps
+- Processes the data in manageable tiles to handle large datasets
+- Calculates building metrics (area, centroids, confidence scores)
+- Stores data in PostGIS-enabled PostgreSQL database
+- Creates spatial indexes for optimal query performance
+- Supports parallel processing for faster data loading
+
+
+## Configuration for Different Countries
+
+### 1. Update Bounding Box Coordinates
+Edit `SQL_SCRIPTS/db_insertion_buildings.py` to set the target country's bounding box:
+
+```python
+# Example for Kenya
+left, bottom = 33.9098, -4.6796  # SW corner
+right, top = 41.9058, 5.5059     # NE corner
+```
+
+### 2. Update Configuration Variables
+```python
+# Change base filename to match your country
+base_filename = "kenya_buildings"
+```
+
+## Running the Data Insertion
+
+### 1. Single Instance (Slower)
+```bash
+cd SQL_SCRIPTS
+python db_insertion_buildings.py --instance-id 0 --total-instances 1
+```
+
+### 2. Parallel Processing (Recommended)
+Run multiple instances simultaneously for faster processing:
+
+```bash
+# Example with 4 parallel instances
+python db_insertion_buildings.py --instance-id 0 --total-instances 4 &
+python db_insertion_buildings.py --instance-id 1 --total-instances 4 &
+python db_insertion_buildings.py --instance-id 2 --total-instances 4 &
+python db_insertion_buildings.py --instance-id 3 --total-instances 4
+```
+
+## Recovery from Failures
+The script supports resuming from interruptions:
+1. Failed tiles are logged in `failed_tiles.csv`
+2. Restart the script with same parameters - it will skip completed tiles
+3. For persistent failures, check the error messages in the failed tiles log
+
+
 ## API Endpoints
 
 ### 1. Home (`/`)
